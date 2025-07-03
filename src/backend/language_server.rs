@@ -223,12 +223,7 @@ impl LanguageServer for Backend {
             return;
         }
 
-        self.client
-            .log_message(
-                MessageType::INFO,
-                "A Cargo.toml file has changed. Re-analyzing...",
-            )
-            .await;
+        info!("Cargo.toml changed. Re-analyzing...");
 
         {
             let mut workspace = self.state.workspace.write().unwrap();
@@ -238,8 +233,6 @@ impl LanguageServer for Backend {
             });
         }
 
-        self.client
-            .log_message(MessageType::INFO, "Workspace re-analysis complete.")
-            .await;
+        info!("Workspace re-analysis complete.")
     }
 }
