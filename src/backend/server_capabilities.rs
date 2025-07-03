@@ -1,9 +1,12 @@
 use tower_lsp::lsp_types::{
-    SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
-    SemanticTokensServerCapabilities, WorkDoneProgressOptions,
+    OneOf,
+    SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend,
+    SemanticTokensOptions, SemanticTokensServerCapabilities, WorkDoneProgressOptions
+    , WorkspaceFoldersServerCapabilities,
+    WorkspaceServerCapabilities,
 };
 
-pub fn server_capabilities() -> Option<SemanticTokensServerCapabilities> {
+pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities> {
     pub const HTML: SemanticTokenType = SemanticTokenType::new("html");
     pub const RUST: SemanticTokenType = SemanticTokenType::new("rust");
 
@@ -33,7 +36,7 @@ pub fn server_capabilities() -> Option<SemanticTokensServerCapabilities> {
             SemanticTokenType::OPERATOR,
             SemanticTokenType::DECORATOR,
             HTML,
-            RUST
+            RUST,
         ],
         token_modifiers: vec![
             SemanticTokenModifier::DECLARATION,
@@ -61,4 +64,15 @@ pub fn server_capabilities() -> Option<SemanticTokensServerCapabilities> {
     ));
 
     semantic_tokens_provider
+}
+
+pub fn workspace_capabilities() -> Option<WorkspaceServerCapabilities> {
+    Some(WorkspaceServerCapabilities {
+        workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+            supported: Some(false),
+            change_notifications: Some(OneOf::Left(true)),
+        }),
+
+        file_operations: None,
+    })
 }

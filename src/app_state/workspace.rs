@@ -31,6 +31,11 @@ impl Workspace {
         let cargo_toml = fs::read_to_string(&root).map_err(|e| e.to_string())?;
         let cargo_toml: Value = toml::from_str(&cargo_toml).map_err(|e| e.to_string())?;
 
+        // Reset workspace
+        self.members = Vec::new();
+        self.views_path = PathBuf::new();
+        self.views_layout = String::new();
+
         let member_paths = cargo_toml
             .get("workspace")
             .and_then(|workspace| workspace.get("members").and_then(|members| members.as_array()))

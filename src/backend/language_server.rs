@@ -1,13 +1,14 @@
 use crate::backend::Backend;
 use crate::backend::process_highlights::process_highlights;
-use crate::backend::server_capabilities::server_capabilities;
+use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
 use tower_lsp::lsp_types::{
-    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType, SemanticTokens,
-    SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind,
+    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    InitializeParams, InitializeResult, InitializedParams, MessageType, SemanticTokens,
+    SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tracing::{error, info};
 use tree_sitter::Point;
@@ -26,7 +27,10 @@ impl LanguageServer for Backend {
             info!("Workspace root path: {:?}", path);
             println!("Workspace root path: {:?}", path);
             self.client
-                .log_message(MessageType::INFO, format!("Workspace root path: {:?}", path))
+                .log_message(
+                    MessageType::INFO,
+                    format!("Workspace root path: {:?}", path),
+                )
                 .await;
 
             let mut workspace = self.state.workspace.write().unwrap();
@@ -35,18 +39,19 @@ impl LanguageServer for Backend {
             });
         }
 
-        let semantic_tokens_provider = server_capabilities();
-
         info!("Sending an initialize response.");
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::INCREMENTAL)),
-                semantic_tokens_provider,
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                    TextDocumentSyncKind::INCREMENTAL,
+                )),
+                semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
                     trigger_characters: Some(vec!["@".to_string()]),
                     ..Default::default()
                 }),
+                workspace: workspace_capabilities(),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -151,28 +156,45 @@ impl LanguageServer for Backend {
     }
 
     // TODO: implement semantic_token_full_delta and range
-    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>, Error> {
         let uri_str = params.text_document.uri.to_string();
         let views = self.state.views.write().unwrap();
 
-        let view = views.get(&uri_str).ok_or(Error::new(ErrorCode::InvalidParams))?;
+        let view = views
+            .get(&uri_str)
+            .ok_or(Error::new(ErrorCode::InvalidParams))?;
 
         info!("Highlights source: {}", view.1);
         let highlight = &self.state.highlight;
 
         let mut highlighter = self.state.highlight.highlighter.lock().unwrap();
         let highlight_events = highlighter
-            .highlight(&highlight.highlight_config, view.1.as_bytes(), None, |lang_name| {
-                highlight.highlight_injects.get(lang_name)
-            })
+            .highlight(
+                &highlight.highlight_config,
+                view.1.as_bytes(),
+                None,
+                |lang_name| highlight.highlight_injects.get(lang_name),
+            )
             .map_err(|e| {
                 error!("Error during highlighting: {}", e);
                 Error::new(ErrorCode::InternalError)
             })?;
 
-        let highlight_names: Vec<&str> = highlight.highlight_names.iter().map(|s| s.as_str()).collect();
+        let highlight_names: Vec<&str> = highlight
+            .highlight_names
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
 
-        let tokens = process_highlights(&view.1, highlight_events, &highlight_names, &highlight.token_type_map)?;
+        let tokens = process_highlights(
+            &view.1,
+            highlight_events,
+            &highlight_names,
+            &highlight.token_type_map,
+        )?;
 
         info!("Tokens: {:?}", tokens);
 
@@ -182,7 +204,42 @@ impl LanguageServer for Backend {
         })))
     }
 
-    async fn completion(&self, _: CompletionParams) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
-        Ok(Some(CompletionResponse::Array(self.state.completion_items.clone())))
+    async fn completion(
+        &self,
+        _: CompletionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
+        Ok(Some(CompletionResponse::Array(
+            self.state.completion_items.clone(),
+        )))
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let cargo_toml_changed = params
+            .changes
+            .iter()
+            .any(|event| event.uri.path().ends_with("/Cargo.toml"));
+
+        if !cargo_toml_changed {
+            return;
+        }
+
+        self.client
+            .log_message(
+                MessageType::INFO,
+                "A Cargo.toml file has changed. Re-analyzing...",
+            )
+            .await;
+
+        {
+            let mut workspace = self.state.workspace.write().unwrap();
+            let root = workspace.root.clone();
+            workspace.load(&root).unwrap_or_else(|e| {
+                info!("Workspace couldn't load: {}", e);
+            });
+        }
+
+        self.client
+            .log_message(MessageType::INFO, "Workspace re-analysis complete.")
+            .await;
     }
 }
