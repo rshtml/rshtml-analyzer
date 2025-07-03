@@ -6,7 +6,7 @@ use crate::app_state::workspace::Workspace;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
-use tree_sitter::{Parser, Tree};
+use tree_sitter::{Language, Parser, Tree};
 use tree_sitter_highlight::HighlightConfiguration;
 
 pub struct AppState {
@@ -15,27 +15,34 @@ pub struct AppState {
     pub highlight: Highlight,
     pub views: Arc<RwLock<HashMap<String, (Option<Tree>, String, usize)>>>,
     pub completion_items: Vec<CompletionItem>,
+    pub language: Language,
 }
 
 impl AppState {
-    pub fn new(parser: Parser, highlight: Highlight, completion_items: Vec<CompletionItem>) -> Self {
+    pub fn new(
+        parser: Parser,
+        highlight: Highlight,
+        completion_items: Vec<CompletionItem>,
+        language: Language,
+    ) -> Self {
         Self {
             workspace: RwLock::new(Workspace::default()),
             parser: Mutex::new(parser),
             highlight,
             views: Arc::new(RwLock::new(HashMap::new())),
             completion_items,
+            language,
         }
     }
 
     pub(crate) fn setup() -> Self {
         let mut parser = Parser::new();
 
-        let lang = tree_sitter::Language::new(tree_sitter_rshtml::LANGUAGE);
+        let lang = Language::new(tree_sitter_rshtml::LANGUAGE);
         parser.set_language(&lang).unwrap();
 
         let mut highlight_config = HighlightConfiguration::new(
-            lang,
+            lang.clone(),
             "rshtml",
             include_str!("../../tree-sitter-rshtml/queries/highlights.scm"),
             include_str!("../../tree-sitter-rshtml/queries/injections.scm"),
@@ -45,7 +52,7 @@ impl AppState {
 
         // Rust highlights
         let mut highlight_config_rust = HighlightConfiguration::new(
-            tree_sitter::Language::new(tree_sitter_rust::LANGUAGE),
+            Language::new(tree_sitter_rust::LANGUAGE),
             "rust",
             include_str!("../../tree-sitter-rust/queries/highlights.scm"),
             include_str!("../../tree-sitter-rust/queries/injections.scm"),
@@ -55,7 +62,7 @@ impl AppState {
 
         // Html highlights
         // let mut highlight_config_html = HighlightConfiguration::new(
-        //     tree_sitter::Language::new(tree_sitter_html::LANGUAGE),
+        //     Language::new(tree_sitter_html::LANGUAGE),
         //     "html",
         //     include_str!("../../tree-sitter-html/queries/highlights.scm"),
         //     include_str!("../../tree-sitter-html/queries/injections.scm"),
@@ -63,8 +70,16 @@ impl AppState {
         // )
         // .unwrap();
 
-        let mut cn: HashSet<String> = highlight_config.names().iter().map(|s| s.to_string()).collect();
-        let cnr: HashSet<String> = highlight_config_rust.names().iter().map(|s| s.to_string()).collect();
+        let mut cn: HashSet<String> = highlight_config
+            .names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cnr: HashSet<String> = highlight_config_rust
+            .names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         //let cnh: HashSet<String> = highlight_config_html.names().iter().map(|s| s.to_string()).collect();
 
         cn.extend(cnr);
@@ -77,10 +92,12 @@ impl AppState {
         //highlight_config_html.configure(final_capture_names.as_ref());
 
         let mut highlights = Highlight::new(highlight_config, final_capture_names.clone());
-        highlights.highlight_injects.insert("rust", highlight_config_rust);
+        highlights
+            .highlight_injects
+            .insert("rust", highlight_config_rust);
         //highlights.highlight_injects.insert("html", highlight_config_html);
 
-        let state = Self::new(parser, highlights, Self::completion_items());
+        let state = Self::new(parser, highlights, Self::completion_items(), lang);
 
         //println!("rshtml: {:?}", final_capture_names);
 
@@ -111,7 +128,9 @@ impl AppState {
         let match_ = CompletionItem {
             label: "match".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some("match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t}\n}".to_string()),
+            insert_text: Some(
+                "match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t}\n}".to_string(),
+            ),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("match statement".to_string()),
             sort_text: Some("03".to_string()),
@@ -141,7 +160,9 @@ impl AppState {
         let use_as_ = CompletionItem {
             label: "use .. as".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string()),
+            insert_text: Some(
+                r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string(),
+            ),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("use .. as directive".to_string()),
             sort_text: Some("06".to_string()),

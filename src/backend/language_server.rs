@@ -1,6 +1,7 @@
 use crate::backend::Backend;
 use crate::backend::process_highlights::process_highlights;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
+use crate::backend::tree_extensions::TreeExtensions;
 use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
 use tower_lsp::lsp_types::{
@@ -83,8 +84,16 @@ impl LanguageServer for Backend {
             parser.parse(&text, None)
         };
 
-        let mut views = self.state.views.write().unwrap();
-        views.insert(uri_str, (tree, text, params.text_document.version as usize));
+        if let Some(tree) = &tree {
+            let include_paths = tree.find_includes(&self.state.language, &text);
+            info!("Include paths: {:?}", include_paths);
+            // TODO: process the include paths
+        }
+
+        {
+            let mut views = self.state.views.write().unwrap();
+            views.insert(uri_str, (tree, text, params.text_document.version as usize));
+        }
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -236,3 +245,26 @@ impl LanguageServer for Backend {
         info!("Workspace re-analysis complete.")
     }
 }
+
+// fn found_it(tree: &Tree) {
+//     if let Some(tree) = &tree {
+//         let mut cursor = tree.walk();
+//         let mut nodes_to_visit = vec![tree.root_node()];
+//
+//         while let Some(node) = nodes_to_visit.pop() {
+//             if node.kind() == "include_directive" {
+//                 let string_line = node
+//                     .child_by_field_name("path")
+//                     .unwrap()
+//                     .utf8_text(text.as_bytes())
+//                     .unwrap_or("unknown");
+//
+//                 info!("Found include directive: {}", string_line);
+//             }
+//
+//             for child in node.children(&mut cursor) {
+//                 nodes_to_visit.push(child);
+//             }
+//         }
+//     }
+// }
