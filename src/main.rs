@@ -10,8 +10,14 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() {
+    let filter_level = if cfg!(debug_assertions) {
+        tracing::Level::DEBUG
+    } else {
+        tracing::Level::INFO
+    };
+
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(filter_level)
         .with_writer(std::io::stderr)
         .init();
 

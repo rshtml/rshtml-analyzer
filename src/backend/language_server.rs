@@ -11,13 +11,13 @@ use tower_lsp::lsp_types::{
     SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
-use tracing::{error, info};
+use tracing::{error,debug};
 use tree_sitter::Point;
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult, Error> {
-        info!("The Initialize request has been received and is being processed...");
+        debug!("The Initialize request has been received and is being processed...");
         let workspace_root_path = params
             .workspace_folders
             .as_ref()
@@ -25,8 +25,7 @@ impl LanguageServer for Backend {
             .and_then(|folder| folder.uri.to_file_path().ok());
 
         if let Some(path) = workspace_root_path {
-            info!("Workspace root path: {:?}", path);
-            println!("Workspace root path: {:?}", path);
+            debug!("Workspace root path: {:?}", path);
             self.client
                 .log_message(
                     MessageType::INFO,
@@ -36,11 +35,11 @@ impl LanguageServer for Backend {
 
             let mut workspace = self.state.workspace.write().unwrap();
             workspace.load(&path).unwrap_or_else(|e| {
-                info!("Workspace couldn't load: {}", e);
+                debug!("Workspace couldn't load: {}", e);
             });
         }
 
-        info!("Sending an initialize response.");
+        debug!("Sending an initialize response.");
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
@@ -86,7 +85,7 @@ impl LanguageServer for Backend {
 
         if let Some(tree) = &tree {
             let include_paths = tree.find_includes(&self.state.language, &text);
-            info!("Include paths: {:?}", include_paths);
+            debug!("Include paths: {:?}", include_paths);
             // TODO: process the include paths
         }
 
@@ -117,7 +116,7 @@ impl LanguageServer for Backend {
 
         for change in params.content_changes {
             if let Some(range) = change.range {
-                //info!("Change detected in file: {} at range: {:?}", uri_str, range);
+                //debug!("Change detected in file: {} at range: {:?}", uri_str, range);
 
                 let start_byte = Self::position_to_byte_offset(&view.1, range.start);
                 let end_byte = Self::position_to_byte_offset(&view.1, range.end);
@@ -176,7 +175,7 @@ impl LanguageServer for Backend {
             .get(&uri_str)
             .ok_or(Error::new(ErrorCode::InvalidParams))?;
 
-        info!("Highlights source: {}", view.1);
+        debug!("Highlights source: {}", view.1);
         let highlight = &self.state.highlight;
 
         let mut highlighter = self.state.highlight.highlighter.lock().unwrap();
@@ -205,7 +204,7 @@ impl LanguageServer for Backend {
             &highlight.token_type_map,
         )?;
 
-        info!("Tokens: {:?}", tokens);
+        debug!("Tokens: {:?}", tokens);
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -232,39 +231,16 @@ impl LanguageServer for Backend {
             return;
         }
 
-        info!("Cargo.toml changed. Re-analyzing...");
+        debug!("Cargo.toml changed. Re-analyzing...");
 
         {
             let mut workspace = self.state.workspace.write().unwrap();
             let root = workspace.root.clone();
             workspace.load(&root).unwrap_or_else(|e| {
-                info!("Workspace couldn't load: {}", e);
+                debug!("Workspace couldn't load: {}", e);
             });
         }
 
-        info!("Workspace re-analysis complete.")
+        debug!("Workspace re-analysis complete.");
     }
 }
-
-// fn found_it(tree: &Tree) {
-//     if let Some(tree) = &tree {
-//         let mut cursor = tree.walk();
-//         let mut nodes_to_visit = vec![tree.root_node()];
-//
-//         while let Some(node) = nodes_to_visit.pop() {
-//             if node.kind() == "include_directive" {
-//                 let string_line = node
-//                     .child_by_field_name("path")
-//                     .unwrap()
-//                     .utf8_text(text.as_bytes())
-//                     .unwrap_or("unknown");
-//
-//                 info!("Found include directive: {}", string_line);
-//             }
-//
-//             for child in node.children(&mut cursor) {
-//                 nodes_to_visit.push(child);
-//             }
-//         }
-//     }
-// }
