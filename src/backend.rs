@@ -6,8 +6,8 @@ mod tree_extensions;
 
 use crate::app_state::AppState;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::Position;
-use tree_sitter::Point;
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent};
+use tree_sitter::{Point, Tree};
 
 pub struct Backend {
     pub client: Client,
@@ -79,32 +79,40 @@ impl Backend {
 
         new_pos
     }
+
+    fn process_changes(&self,
+        content_changes: Vec<TextDocumentContentChangeEvent>,
+        source: &mut String,
+        tree: &mut Tree,
+    ) {
+        for change in content_changes {
+            if let Some(range) = change.range {
+                let start_byte = Self::position_to_byte_offset(&source, range.start);
+                let end_byte = Self::position_to_byte_offset(&source, range.end);
+
+                let edit = tree_sitter::InputEdit {
+                    start_byte,
+                    old_end_byte: end_byte,
+                    new_end_byte: start_byte + change.text.len(),
+                    start_position: Point {
+                        row: range.start.line as usize,
+                        column: range.start.character as usize,
+                    },
+                    old_end_position: Point {
+                        row: range.end.line as usize,
+                        column: range.end.character as usize,
+                    },
+                    new_end_position: Self::calculate_new_end_point(range.start, &change.text),
+                };
+
+                tree.edit(&edit);
+
+                source.replace_range(start_byte..end_byte, &change.text);
+            } else {
+                *source = change.text;
+                break;
+            }
+        }
+    }
     
-    // pub fn find_manifest_dir(&self, workspace_root: &Path, file_path: &Path) -> Option<PathBuf> {
-    //     // path.ancestors()
-    //     //     .find(|p| p.join("Cargo.toml").exists())
-    //     //     .map(|p| p.to_path_buf())
-    //
-    //     if !file_path.starts_with(workspace_root) {
-    //         return None;
-    //     }
-    //
-    //     let starting_dir = if file_path.is_dir() {
-    //         file_path
-    //     } else {
-    //         file_path.parent()?
-    //     };
-    //
-    //     for current_dir in starting_dir.ancestors() {
-    //         if current_dir.join("Cargo.toml").exists() {
-    //             return Some(current_dir.to_path_buf());
-    //         }
-    //
-    //         if current_dir == workspace_root {
-    //             break;
-    //         }
-    //     }
-    //
-    //     None
-    // }
 }

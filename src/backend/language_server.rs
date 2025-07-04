@@ -1,3 +1,4 @@
+use crate::app_state::view::View;
 use crate::backend::Backend;
 use crate::backend::process_highlights::process_highlights;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
@@ -12,7 +13,7 @@ use tower_lsp::lsp_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tracing::{debug, error};
-use tree_sitter::Point;
+use tree_sitter::{InputEdit, Point, Tree};
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -83,19 +84,29 @@ impl LanguageServer for Backend {
             parser.parse(&text, None)
         };
 
-        if let Some(tree) = &tree {
-            let include_paths = tree.find_includes(&self.state.language, &text);
-            debug!("Include paths: {:?}", include_paths);
-            // TODO: process the include paths
+        let tree = if let Some(tree) = tree {
+            tree
+        } else {
+            self.client
+                .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
+                .await;
+            return;
+        };
 
-            let use_directives = tree.find_uses(&self.state.language, &text);
-            debug!("Use directives: {:?}", use_directives);
-            // TODO: process the use directives
-        }
+        let include_paths = tree.find_includes(&self.state.language, &text);
+        debug!("Include paths: {:?}", include_paths);
+        // TODO: process the include paths
+
+        let use_directives = tree.find_uses(&self.state.language, &text);
+        debug!("Use directives: {:?}", use_directives);
+        // TODO: process the use directives
 
         {
             let mut views = self.state.views.write().unwrap();
-            views.insert(uri_str, (tree, text, params.text_document.version as usize));
+            views.insert(
+                uri_str,
+                View::new(text, tree, params.text_document.version as usize),
+            );
         }
     }
 
@@ -104,58 +115,42 @@ impl LanguageServer for Backend {
         self.client.log_message(MessageType::INFO, msg).await;
 
         let uri_str = params.text_document.uri.to_string();
+        let tree = {
+            let mut views = self.state.views.write().unwrap();
+            let view = match views.get_mut(&uri_str) {
+                Some(v) => v,
+                None => {
+                    error!("Received change for untracked file: {}", uri_str);
+                    return;
+                }
+            };
 
-        let mut views = self.state.views.write().unwrap();
-        let view = match views.get_mut(&uri_str) {
-            Some(v) => v,
-            None => {
-                error!("Received change for untracked file: {}", uri_str);
+            if view.version >= params.text_document.version as usize {
                 return;
+            }
+
+            self.process_changes(params.content_changes, &mut view.source, &mut view.tree);
+
+            {
+                let mut parser = self.state.parser.lock().unwrap();
+                parser.parse(&view.source, Some(&view.tree))
             }
         };
 
-        if view.2 >= params.text_document.version as usize {
+        let tree = if let Some(tree) = tree {
+            tree
+        } else {
+            self.client
+                .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
+                .await;
             return;
-        }
+        };
 
-        for change in params.content_changes {
-            if let Some(range) = change.range {
-                //debug!("Change detected in file: {} at range: {:?}", uri_str, range);
+        let mut views = self.state.views.write().unwrap();
+        let view = views.get_mut(&uri_str).unwrap();
 
-                let start_byte = Self::position_to_byte_offset(&view.1, range.start);
-                let end_byte = Self::position_to_byte_offset(&view.1, range.end);
-
-                if let Some(tree) = &mut view.0 {
-                    let edit = tree_sitter::InputEdit {
-                        start_byte,
-                        old_end_byte: end_byte,
-                        new_end_byte: start_byte + change.text.len(),
-                        start_position: Point {
-                            row: range.start.line as usize,
-                            column: range.start.character as usize,
-                        },
-                        old_end_position: Point {
-                            row: range.end.line as usize,
-                            column: range.end.character as usize,
-                        },
-                        new_end_position: Self::calculate_new_end_point(range.start, &change.text),
-                    };
-                    tree.edit(&edit);
-                }
-
-                view.1.replace_range(start_byte..end_byte, &change.text);
-            } else {
-                view.1 = change.text;
-                view.0 = None;
-
-                break;
-            }
-        }
-
-        let mut parser = self.state.parser.lock().unwrap();
-
-        view.0 = parser.parse(&view.1, view.0.as_ref());
-        view.2 = params.text_document.version as usize;
+        view.version = params.text_document.version as usize;
+        view.tree = tree;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -179,14 +174,14 @@ impl LanguageServer for Backend {
             .get(&uri_str)
             .ok_or(Error::new(ErrorCode::InvalidParams))?;
 
-        debug!("Highlights source: {}", view.1);
+        debug!("Highlights source: {}", view.source);
         let highlight = &self.state.highlight;
 
         let mut highlighter = self.state.highlight.highlighter.lock().unwrap();
         let highlight_events = highlighter
             .highlight(
                 &highlight.highlight_config,
-                view.1.as_bytes(),
+                view.source.as_bytes(),
                 None,
                 |lang_name| highlight.highlight_injects.get(lang_name),
             )
@@ -202,7 +197,7 @@ impl LanguageServer for Backend {
             .collect();
 
         let tokens = process_highlights(
-            &view.1,
+            &view.source,
             highlight_events,
             &highlight_names,
             &highlight.token_type_map,

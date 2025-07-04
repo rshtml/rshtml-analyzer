@@ -1,19 +1,21 @@
 mod highlight;
 pub mod workspace;
+pub mod view;
 
 use crate::app_state::highlight::Highlight;
+use crate::app_state::view::View;
 use crate::app_state::workspace::Workspace;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
-use tree_sitter::{Language, Parser, Tree};
+use tree_sitter::{Language, Parser};
 use tree_sitter_highlight::HighlightConfiguration;
 
 pub struct AppState {
     pub workspace: RwLock<Workspace>,
     pub parser: Mutex<Parser>,
     pub highlight: Highlight,
-    pub views: Arc<RwLock<HashMap<String, (Option<Tree>, String, usize)>>>,
+    pub views: Arc<RwLock<HashMap<String, View>>>,
     pub completion_items: Vec<CompletionItem>,
     pub language: Language,
 }
