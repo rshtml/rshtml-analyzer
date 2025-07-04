@@ -2,6 +2,8 @@ use tracing::error;
 use tree_sitter::{Language, Query, QueryCursor, QueryMatch, StreamingIterator};
 
 pub trait TreeExtensions {
+    const STRING_TRIMS: &'_ [char] = &[' ', '\'', '"'];
+
     fn find<T, F>(
         &self,
         language: &Language,
@@ -13,6 +15,8 @@ pub trait TreeExtensions {
         F: FnMut(&QueryMatch) -> Option<T>;
 
     fn find_includes(&self, language: &Language, source: &str) -> Vec<String>;
+
+    fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)>;
 }
 
 impl TreeExtensions for tree_sitter::Tree {
@@ -53,13 +57,43 @@ impl TreeExtensions for tree_sitter::Tree {
                 .node
                 .utf8_text(source.as_bytes())
                 .ok()?
-                .trim_matches('"')
+                .trim_matches(Self::STRING_TRIMS)
                 .to_string();
 
             Some(include_path)
         })
         .unwrap_or_else(|x| {
             error!("Error during include path query: {}", x);
+            vec![]
+        })
+    }
+
+    fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)> {
+        let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (rust_identifier) @use_alias))";
+        self.find(language, query_str, &source, |x| {
+            let mut captures = x.captures.iter();
+            let use_path = captures
+                .next()?
+                .node
+                .utf8_text(source.as_bytes())
+                .ok()?
+                .trim()
+                .trim_matches(Self::STRING_TRIMS)
+                .to_string();
+
+            let mut use_alias = || {
+                captures
+                    .next()?
+                    .node
+                    .utf8_text(source.as_bytes())
+                    .ok()
+                    .map(|x| x.trim().to_string())
+            };
+
+            Some((use_path, use_alias()))
+        })
+        .unwrap_or_else(|x| {
+            error!("Error during use_path query: {}", x);
             vec![]
         })
     }

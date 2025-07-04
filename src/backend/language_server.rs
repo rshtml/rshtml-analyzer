@@ -11,7 +11,7 @@ use tower_lsp::lsp_types::{
     SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind,
 };
-use tracing::{error,debug};
+use tracing::{debug, error};
 use tree_sitter::Point;
 
 #[tower_lsp::async_trait]
@@ -87,6 +87,10 @@ impl LanguageServer for Backend {
             let include_paths = tree.find_includes(&self.state.language, &text);
             debug!("Include paths: {:?}", include_paths);
             // TODO: process the include paths
+
+            let use_directives = tree.find_uses(&self.state.language, &text);
+            debug!("Use directives: {:?}", use_directives);
+            // TODO: process the use directives
         }
 
         {
