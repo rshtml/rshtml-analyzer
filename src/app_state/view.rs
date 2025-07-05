@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
 use tree_sitter::Tree;
 
@@ -38,34 +38,49 @@ impl View {
             .collect()
     }
 
+    fn use_directive_completion_item(use_name: &str) -> Vec<(char, CompletionItem)> {
+        let tag_item = CompletionItem {
+            label: use_name.to_owned(),
+            kind: Some(CompletionItemKind::STRUCT),
+            detail: Some(format!("{} component", use_name)),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            insert_text: Some(use_name.to_owned() + " ${1:parameters} />"),
+            sort_text: Some("01".to_string()),
+            ..Default::default()
+        };
+
+        let at_item = CompletionItem {
+            label: use_name.to_owned(),
+            kind: Some(CompletionItemKind::STRUCT),
+            detail: Some(format!("{} component", use_name)),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            insert_text: Some(use_name.to_owned() + "(" + " ${1:parameters} ) { ${2:body} }"),
+            sort_text: Some("01".to_string()),
+            ..Default::default()
+        };
+
+        vec![('<', tag_item), ('@', at_item)]
+    }
+
     pub fn create_use_directive_completion_items(&mut self) {
         let use_names = self.use_directives_names();
 
         for use_name in use_names {
-            let tag_item = CompletionItem {
-                label: use_name.to_owned(),
-                kind: Some(CompletionItemKind::MODULE),
-                detail: Some(format!("{} component", use_name)),
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                insert_text: Some(use_name.to_owned() + " ${1:parameters} />"),
-                sort_text: Some("01".to_string()),
-                ..Default::default()
-            };
+            let items = Self::use_directive_completion_item(&use_name);
 
-            let at_item = CompletionItem {
-                label: use_name.to_owned(),
-                kind: Some(CompletionItemKind::MODULE),
-                detail: Some(format!("{} component", use_name)),
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                insert_text: Some(use_name.to_owned() + "(" + " ${1:parameters} ) { ${2:body} }"),
-                sort_text: Some("01".to_string()),
-                ..Default::default()
-            };
+            self.completion_items.entry(use_name).or_default().extend(items);
+        }
+    }
 
+    pub fn update_use_directive_completion_items(&mut self) {
+        let current_names: HashSet<String> = self.use_directives_names().into_iter().collect();
+
+        self.completion_items.retain(|name, _| current_names.contains(name));
+
+        for name in current_names {
             self.completion_items
-                .entry(use_name)
-                .or_default()
-                .extend(vec![('<', tag_item), ('@', at_item)]);
+                .entry(name)
+                .or_insert_with_key(|use_name| Self::use_directive_completion_item(use_name));
         }
     }
 }

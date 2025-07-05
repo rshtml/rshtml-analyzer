@@ -6,10 +6,10 @@ use crate::backend::tree_extensions::TreeExtensions;
 use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, MessageType, SemanticTokens, SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind,
+    CompletionItem, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
+    SemanticTokens, SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind,
 };
 use tracing::{debug, error};
 
@@ -99,8 +99,6 @@ impl LanguageServer for Backend {
             let mut views = self.state.views.write().unwrap();
             views.insert(uri_str, view);
         }
-
-        // TODO: process the include paths and use directives
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -142,8 +140,14 @@ impl LanguageServer for Backend {
         let mut views = self.state.views.write().unwrap();
         let view = views.get_mut(&uri_str).unwrap();
 
+        let include_paths = tree.find_includes(&self.state.language, &view.source);
+        let use_directives = tree.find_uses(&self.state.language, &view.source);
+
         view.version = params.text_document.version as usize;
         view.tree = tree;
+        view.include_paths = include_paths;
+        view.use_directives = use_directives;
+        view.update_use_directive_completion_items();
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
