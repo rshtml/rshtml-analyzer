@@ -6,12 +6,12 @@ use crate::backend::tree_extensions::TreeExtensions;
 use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, InsertTextFormat, MessageType,
-    SemanticTokens, SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    CompletionItem, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
+    InitializedParams, MessageType, SemanticTokens, SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tracing::{debug, error};
-use tree_sitter::{InputEdit, Point, Tree};
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -25,7 +25,9 @@ impl LanguageServer for Backend {
 
         if let Some(path) = workspace_root_path {
             debug!("Workspace root path: {:?}", path);
-            self.client.log_message(MessageType::INFO, format!("Workspace root path: {:?}", path)).await;
+            self.client
+                .log_message(MessageType::INFO, format!("Workspace root path: {:?}", path))
+                .await;
 
             let mut workspace = self.state.workspace.write().unwrap();
             workspace.load(&path).unwrap_or_else(|e| {
@@ -76,7 +78,9 @@ impl LanguageServer for Backend {
         let tree = if let Some(tree) = tree {
             tree
         } else {
-            self.client.log_message(MessageType::ERROR, "Parser error: Couldn't create tree.").await;
+            self.client
+                .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
+                .await;
             return;
         };
 
@@ -90,6 +94,7 @@ impl LanguageServer for Backend {
             let mut view = View::new(text, tree, params.text_document.version as usize);
             view.include_paths = include_paths;
             view.use_directives = use_directives;
+            view.create_use_directive_completion_items();
 
             let mut views = self.state.views.write().unwrap();
             views.insert(uri_str, view);
@@ -128,7 +133,9 @@ impl LanguageServer for Backend {
         let tree = if let Some(tree) = tree {
             tree
         } else {
-            self.client.log_message(MessageType::ERROR, "Parser error: Couldn't create tree.").await;
+            self.client
+                .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
+                .await;
             return;
         };
 
@@ -174,65 +181,42 @@ impl LanguageServer for Backend {
 
         debug!("Tokens: {:?}", tokens);
 
-        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens { result_id: None, data: tokens })))
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens,
+        })))
     }
 
     async fn completion(&self, params: CompletionParams) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
+        let trigger_char = params.context.and_then(|ctx| ctx.trigger_character).and_then(|s| s.chars().next());
 
-        // TODO: hold it in views in use directives
-        let use_names = {
-            let views = self.state.views.read().unwrap();
-            views
-                .get(&uri.to_string())
-                .and_then(|view| Some(view.use_directives_names()))
-                .unwrap_or(Vec::new())
-        };
+        let views = self.state.views.read().unwrap();
+        let view = views.get(&uri.to_string()).ok_or(Error::new(ErrorCode::InvalidParams))?;
 
         let mut completion_items: Vec<CompletionItem> = Vec::new();
 
-        let tag_open = |mut completion_items: Vec<CompletionItem>| {
-            completion_items.extend(use_names.iter().map(|use_name| CompletionItem {
-                label: use_name.to_owned(),
-                kind: Some(CompletionItemKind::MODULE),
-                detail: Some(format!("{} component", use_name)),
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                insert_text: Some(use_name.to_owned() + " ${1:parameters} />"),
-                sort_text: Some("01".to_string()),
-                ..Default::default()
-            }));
+        if let Some(tc) = trigger_char {
+            for items in view.completion_items.values() {
+                for (item_char, item) in items {
+                    if *item_char == tc {
+                        completion_items.push(item.clone());
+                    }
+                }
+            }
 
-            completion_items
-        };
-
-        let others = |mut completion_items: Vec<CompletionItem>| {
-            completion_items.extend(use_names.iter().map(|use_name| CompletionItem {
-                label: use_name.to_owned(),
-                kind: Some(CompletionItemKind::MODULE),
-                detail: Some(format!("{} component", use_name)),
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                insert_text: Some(use_name.to_owned() + "(" + " ${1:parameters} ) { ${2:body} }"),
-                sort_text: Some("01".to_string()),
-                ..Default::default()
-            }));
+            if tc == '@' {
+                completion_items.extend(self.state.completion_items.clone());
+            }
+        } else {
+            for items in view.completion_items.values() {
+                for (_, item) in items {
+                    completion_items.push(item.clone());
+                }
+            }
 
             completion_items.extend(self.state.completion_items.clone());
-
-            completion_items
-        };
-
-        let trigger_char = params.context.and_then(|x| x.trigger_character);
-
-        if let Some(tc) = trigger_char
-            && tc == "<"
-        {
-            completion_items = tag_open(completion_items);
-        } else {
-            completion_items = others(completion_items);
         }
-
-        // let mut completion_items = self.state.completion_items.clone();
-        // completion_items.extend(use_compilation_items);
 
         Ok(Some(CompletionResponse::Array(completion_items)))
     }
