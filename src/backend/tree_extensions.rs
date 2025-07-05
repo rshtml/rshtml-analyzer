@@ -69,7 +69,7 @@ impl TreeExtensions for tree_sitter::Tree {
     }
 
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)> {
-        let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (rust_identifier) @use_alias))";
+        let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (rust_identifier) @use_alias)?)";
         self.find(language, query_str, &source, |x| {
             let mut captures = x.captures.iter();
             let use_path = captures
@@ -81,16 +81,12 @@ impl TreeExtensions for tree_sitter::Tree {
                 .trim_matches(Self::STRING_TRIMS)
                 .to_string();
 
-            let mut use_alias = || {
-                captures
-                    .next()?
-                    .node
-                    .utf8_text(source.as_bytes())
-                    .ok()
-                    .map(|x| x.trim().to_string())
-            };
+            let use_alias = captures
+                .next()
+                .and_then(|x| x.node.utf8_text(source.as_bytes()).ok())
+                .map(|x| x.trim().to_string());
 
-            Some((use_path, use_alias()))
+            Some((use_path, use_alias))
         })
         .unwrap_or_else(|x| {
             error!("Error during use_path query: {}", x);
