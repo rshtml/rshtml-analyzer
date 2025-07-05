@@ -1,37 +1,26 @@
-use tracing::error;
+use tracing::{debug, error};
 use tree_sitter::{Language, Query, QueryCursor, QueryMatch, StreamingIterator};
 
 pub trait TreeExtensions {
     const STRING_TRIMS: &'_ [char] = &[' ', '\'', '"'];
 
-    fn find<T, F>(
-        &self,
-        language: &Language,
-        query_str: &str,
-        source: &str,
-        processor: F,
-    ) -> Result<Vec<T>, String>
+    fn find<T, F>(&self, language: &Language, query_str: &str, source: &str, processor: F) -> Result<Vec<T>, String>
     where
         F: FnMut(&QueryMatch) -> Option<T>;
 
     fn find_includes(&self, language: &Language, source: &str) -> Vec<String>;
 
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)>;
+
+    fn find_layout(&self, language: &Language, source: &str) -> Option<String>;
 }
 
 impl TreeExtensions for tree_sitter::Tree {
-    fn find<T, F>(
-        &self,
-        language: &Language,
-        query_str: &str,
-        source: &str,
-        mut processor: F,
-    ) -> Result<Vec<T>, String>
+    fn find<T, F>(&self, language: &Language, query_str: &str, source: &str, mut processor: F) -> Result<Vec<T>, String>
     where
         F: FnMut(&QueryMatch) -> Option<T>,
     {
-        let query = Query::new(language, query_str)
-            .map_err(|e| format!("Failed to create query: {}", e))?;
+        let query = Query::new(language, query_str).map_err(|e| format!("Failed to create query: {}", e))?;
         let mut query_cursor = QueryCursor::new();
         let source_bytes = source.as_bytes();
 
@@ -91,6 +80,36 @@ impl TreeExtensions for tree_sitter::Tree {
         .unwrap_or_else(|x| {
             error!("Error during use_path query: {}", x);
             vec![]
+        })
+    }
+
+    fn find_layout(&self, language: &Language, source: &str) -> Option<String> {
+        let query_str = "(extends_directive) @directive";
+        self.find(language, query_str, &source, |x| {
+            Some(
+                x.captures
+                    .first()
+                    .and_then(|x| {
+                        Some(
+                            x.node
+                                .child_by_field_name("path")?
+                                .child(0)?
+                                .utf8_text(source.as_bytes())
+                                .ok()?
+                                .trim_matches(Self::STRING_TRIMS)
+                                .to_string(),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        // TODO: find default layout
+                        "".to_string() // must be default layout name
+                    }),
+            )
+        })
+        .map(|mut x| x.pop())
+        .unwrap_or_else(|err| {
+            debug!("Error during layout query: {}", err);
+            None
         })
     }
 }

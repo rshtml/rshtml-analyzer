@@ -13,6 +13,8 @@ use tower_lsp::lsp_types::{
 };
 use tracing::{debug, error};
 
+// TODO: layout içerisinde olunup olunmadığın layout içerisindeyse section ların önerilmesini sağla.
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult, Error> {
@@ -90,8 +92,12 @@ impl LanguageServer for Backend {
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
+        let layout_path = tree.find_layout(&self.state.language, &text);
+        debug!("Layout path: {:?}", layout_path);
+
         {
             let mut view = View::new(text, tree, params.text_document.version as usize);
+            view.layout_path = layout_path;
             view.include_paths = include_paths;
             view.use_directives = use_directives;
             view.create_use_directive_completion_items();
@@ -140,11 +146,13 @@ impl LanguageServer for Backend {
         let mut views = self.state.views.write().unwrap();
         let view = views.get_mut(&uri_str).unwrap();
 
+        let layout_path = tree.find_layout(&self.state.language, &view.source);
         let include_paths = tree.find_includes(&self.state.language, &view.source);
         let use_directives = tree.find_uses(&self.state.language, &view.source);
 
         view.version = params.text_document.version as usize;
         view.tree = tree;
+        view.layout_path = layout_path;
         view.include_paths = include_paths;
         view.use_directives = use_directives;
         view.update_use_directive_completion_items();

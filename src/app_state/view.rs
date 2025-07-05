@@ -5,6 +5,7 @@ use tree_sitter::Tree;
 pub struct View {
     pub source: String,
     pub tree: Tree,
+    pub layout_path: Option<String>,
     pub include_paths: Vec<String>,
     pub use_directives: Vec<(String, Option<String>)>,
     pub completion_items: HashMap<String, Vec<(char, CompletionItem)>>,
@@ -17,6 +18,7 @@ impl View {
         Self {
             source,
             tree,
+            layout_path: None,
             include_paths: Vec::new(),
             use_directives: Vec::new(),
             completion_items: HashMap::new(),
