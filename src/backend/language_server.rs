@@ -13,7 +13,10 @@ use tower_lsp::lsp_types::{
 };
 use tracing::{debug, error};
 
-// TODO: layout içerisinde olunup olunmadığın layout içerisindeyse section ların önerilmesini sağla.
+// TODO: Implement didchangedwatchedfiles event -- state te workspace index tut ve
+// TODO: sadece gerekli tanımlamaları hashmap te tut. component tanımlamaları, include yolları gibi.
+// TODO: Implement go to definition
+// TODO: Implement to send errors - textDocument/publishDiagnostics - self.client.publish_diagnostics()
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
