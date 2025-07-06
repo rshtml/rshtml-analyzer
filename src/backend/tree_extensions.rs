@@ -13,6 +13,8 @@ pub trait TreeExtensions {
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)>;
 
     fn find_extends(&self, language: &Language, source: &str) -> Option<Option<String>>;
+
+    fn find_sections(&self, language: &Language, source: &str) -> Vec<String>;
 }
 
 impl TreeExtensions for tree_sitter::Tree {
@@ -104,5 +106,25 @@ impl TreeExtensions for tree_sitter::Tree {
             .pop()?;
 
         extends
+    }
+
+    fn find_sections(&self, language: &Language, source: &str) -> Vec<String> {
+        let query_str = "[(section_directive name: (string_line) @name) (section_block name: (rust_identifier) @name)]";
+        self.find(language, query_str, &source, |x| {
+            let section_name = x
+                .captures
+                .first()?
+                .node
+                .utf8_text(source.as_bytes())
+                .ok()?
+                .trim_matches(Self::STRING_TRIMS)
+                .to_string();
+
+            Some(section_name)
+        })
+        .unwrap_or_else(|x| {
+            error!("Error during include path query: {}", x);
+            vec![]
+        })
     }
 }

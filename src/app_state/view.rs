@@ -9,6 +9,7 @@ pub struct View {
     pub layout_path: Option<PathBuf>,
     pub include_paths: Vec<String>,
     pub use_directives: Vec<(String, Option<String>)>,
+    pub section_names: Vec<String>,
     pub completion_items: HashMap<String, Vec<(char, CompletionItem)>>,
 
     pub version: usize,
@@ -22,6 +23,7 @@ impl View {
             layout_path: None,
             include_paths: Vec::new(),
             use_directives: Vec::new(),
+            section_names: Vec::new(),
             completion_items: HashMap::new(),
             version,
         }

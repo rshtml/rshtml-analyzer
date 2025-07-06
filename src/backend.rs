@@ -8,7 +8,6 @@ use crate::app_state::AppState;
 use std::path::PathBuf;
 use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
 use tower_lsp::Client;
-use tracing::debug;
 use tree_sitter::{Point, Tree};
 
 pub struct Backend {

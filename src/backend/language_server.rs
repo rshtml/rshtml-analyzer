@@ -93,9 +93,11 @@ impl LanguageServer for Backend {
         debug!("Use directives: {:?}", use_directives);
 
         let extends = tree.find_extends(&self.state.language, &text);
-        debug!("Extends: {:?}", extends);
         let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
         debug!("Layout path: {:?}", layout_path);
+
+        let section_names = tree.find_sections(&self.state.language, &text);
+        debug!("Sections: {:?}", section_names);
 
         {
             let mut view = View::new(text, tree, params.text_document.version as usize);
@@ -103,6 +105,7 @@ impl LanguageServer for Backend {
             view.include_paths = include_paths;
             view.use_directives = use_directives;
             view.create_use_directive_completion_items();
+            view.section_names = section_names;
 
             let mut views = self.state.views.write().unwrap();
             views.insert(uri_str, view);
@@ -153,6 +156,7 @@ impl LanguageServer for Backend {
 
         let include_paths = tree.find_includes(&self.state.language, &view.source);
         let use_directives = tree.find_uses(&self.state.language, &view.source);
+        let section_names = tree.find_sections(&self.state.language, &view.source);
 
         view.version = params.text_document.version as usize;
         view.tree = tree;
@@ -160,6 +164,7 @@ impl LanguageServer for Backend {
         view.include_paths = include_paths;
         view.use_directives = use_directives;
         view.update_use_directive_completion_items();
+        view.section_names = section_names;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
