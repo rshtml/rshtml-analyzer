@@ -92,7 +92,9 @@ impl LanguageServer for Backend {
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
-        let layout_path = tree.find_layout(&self.state.language, &text);
+        let extends = tree.find_extends(&self.state.language, &text);
+        debug!("Extends: {:?}", extends);
+        let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
         debug!("Layout path: {:?}", layout_path);
 
         {
@@ -146,7 +148,9 @@ impl LanguageServer for Backend {
         let mut views = self.state.views.write().unwrap();
         let view = views.get_mut(&uri_str).unwrap();
 
-        let layout_path = tree.find_layout(&self.state.language, &view.source);
+        let extends = tree.find_extends(&self.state.language, &view.source);
+        let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
+
         let include_paths = tree.find_includes(&self.state.language, &view.source);
         let use_directives = tree.find_uses(&self.state.language, &view.source);
 
@@ -174,7 +178,7 @@ impl LanguageServer for Backend {
 
         let view = views.get(&uri_str).ok_or(Error::new(ErrorCode::InvalidParams))?;
 
-        debug!("Highlights source: {}", view.source);
+        //debug!("Highlights source: {}", view.source);
         let highlight = &self.state.highlight;
 
         let mut highlighter = self.state.highlight.highlighter.lock().unwrap();
@@ -191,7 +195,7 @@ impl LanguageServer for Backend {
 
         let tokens = process_highlights(&view.source, highlight_events, &highlight_names, &highlight.token_type_map)?;
 
-        debug!("Tokens: {:?}", tokens);
+        //debug!("Tokens: {:?}", tokens);
 
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,

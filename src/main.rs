@@ -7,19 +7,28 @@ use crate::app_state::AppState;
 use crate::backend::Backend;
 use tower_lsp::{LspService, Server};
 use tracing::info;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[tokio::main]
 async fn main() {
-    let filter_level = if cfg!(debug_assertions) {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    };
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn,rshtml_analyzer=debug"));
+    let subscriber = FmtSubscriber::builder()
+         .with_env_filter(filter)
+        .finish();
 
-    tracing_subscriber::fmt()
-        .with_max_level(filter_level)
-        .with_writer(std::io::stderr)
-        .init();
+    tracing::subscriber::set_global_default(subscriber)
+           .expect("setting default subscriber failed");
+
+    // let filter_level = if cfg!(debug_assertions) {
+    //     tracing::Level::DEBUG
+    // } else {
+    //     tracing::Level::INFO
+    // };
+    //
+    // tracing_subscriber::fmt()
+    //     .with_max_level(filter_level)
+    //     .with_writer(std::io::stderr)
+    //     .init();
 
     // let stdin = tokio::io::stdin();
     // let stdout = tokio::io::stdout();

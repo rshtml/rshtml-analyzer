@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
 use tree_sitter::Tree;
 
 pub struct View {
     pub source: String,
     pub tree: Tree,
-    pub layout_path: Option<String>,
+    pub layout_path: Option<PathBuf>,
     pub include_paths: Vec<String>,
     pub use_directives: Vec<(String, Option<String>)>,
     pub completion_items: HashMap<String, Vec<(char, CompletionItem)>>,

@@ -5,8 +5,10 @@ mod server_capabilities;
 mod tree_extensions;
 
 use crate::app_state::AppState;
+use std::path::PathBuf;
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent};
+use tracing::debug;
 use tree_sitter::{Point, Tree};
 
 pub struct Backend {
@@ -16,10 +18,7 @@ pub struct Backend {
 
 impl Backend {
     pub fn new(client: Client, app_state: AppState) -> Self {
-        Self {
-            client,
-            state: app_state,
-        }
+        Self { client, state: app_state }
     }
 
     fn position_to_byte_offset(text: &str, position: Position) -> usize {
@@ -80,11 +79,7 @@ impl Backend {
         new_pos
     }
 
-    fn process_changes(&self,
-        content_changes: Vec<TextDocumentContentChangeEvent>,
-        source: &mut String,
-        tree: &mut Tree,
-    ) {
+    fn process_changes(&self, content_changes: Vec<TextDocumentContentChangeEvent>, source: &mut String, tree: &mut Tree) {
         for change in content_changes {
             if let Some(range) = change.range {
                 let start_byte = Self::position_to_byte_offset(&source, range.start);
@@ -114,5 +109,17 @@ impl Backend {
             }
         }
     }
-    
+
+    fn find_layout(&self, uri: &Url, layout_name: Option<&str>) -> Option<PathBuf> {
+        let file_path = uri.to_file_path().ok()?;
+
+        let workspace = self.state.workspace.read().unwrap();
+        layout_name
+            .and_then(|layout_name| {
+                let member = workspace.get_member_by_view(&file_path)?;
+                let layout_path = member.views_path.join(layout_name);
+                Some(layout_path)
+            })
+            .or_else(|| workspace.get_layout_path_by_view(&file_path))
+    }
 }

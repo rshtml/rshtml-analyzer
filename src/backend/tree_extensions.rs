@@ -1,4 +1,4 @@
-use tracing::{debug, error};
+use tracing::error;
 use tree_sitter::{Language, Query, QueryCursor, QueryMatch, StreamingIterator};
 
 pub trait TreeExtensions {
@@ -12,7 +12,7 @@ pub trait TreeExtensions {
 
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)>;
 
-    fn find_layout(&self, language: &Language, source: &str) -> Option<String>;
+    fn find_extends(&self, language: &Language, source: &str) -> Option<Option<String>>;
 }
 
 impl TreeExtensions for tree_sitter::Tree {
@@ -83,33 +83,26 @@ impl TreeExtensions for tree_sitter::Tree {
         })
     }
 
-    fn find_layout(&self, language: &Language, source: &str) -> Option<String> {
+    fn find_extends(&self, language: &Language, source: &str) -> Option<Option<String>> {
         let query_str = "(extends_directive) @directive";
-        self.find(language, query_str, &source, |x| {
-            Some(
-                x.captures
-                    .first()
-                    .and_then(|x| {
-                        Some(
-                            x.node
-                                .child_by_field_name("path")?
-                                .child(0)?
-                                .utf8_text(source.as_bytes())
-                                .ok()?
-                                .trim_matches(Self::STRING_TRIMS)
-                                .to_string(),
-                        )
-                    })
-                    .unwrap_or_else(|| {
-                        // TODO: find default layout
-                        "".to_string() // must be default layout name
-                    }),
-            )
-        })
-        .map(|mut x| x.pop())
-        .unwrap_or_else(|err| {
-            debug!("Error during layout query: {}", err);
-            None
-        })
+        let extends = self
+            .find(language, query_str, &source, |x| {
+                let capture = Some(x.captures.first().and_then(|x| {
+                    Some(
+                        x.node
+                            .child_by_field_name("path")?
+                            .utf8_text(source.as_bytes())
+                            .ok()?
+                            .trim_matches(Self::STRING_TRIMS)
+                            .to_string(),
+                    )
+                }));
+
+                Some(capture)
+            })
+            .ok()?
+            .pop()?;
+
+        extends
     }
 }
