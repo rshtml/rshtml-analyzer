@@ -106,8 +106,20 @@ impl LanguageServer for Backend {
             view.use_directives = use_directives;
             view.create_use_directive_completion_items();
             view.section_names = section_names;
+            view.create_section_completion_items();
 
             let mut views = self.state.views.write().unwrap();
+
+            // for (p, v) in views.iter() {
+            //     debug!("Layout path AAA: {:?}", p);
+            //     if let Some(layout_path) = &v.layout_path
+            //         && layout_path.to_string_lossy().to_string() == *p
+            //     {
+            //         v.create_section_completion_items();
+            //         break;
+            //     }
+            // }
+
             views.insert(uri_str, view);
         }
     }
@@ -237,6 +249,27 @@ impl LanguageServer for Backend {
             }
 
             completion_items.extend(self.state.completion_items.clone());
+        }
+
+        if Some('@') == trigger_char || None == trigger_char {
+            for v in views.values() {
+                let is_layout = uri.to_file_path().map(|x| v.layout_path == Some(x)).unwrap_or(false);
+                if is_layout {
+                    let items = v
+                        .completion_items
+                        .iter()
+                        .filter_map(|(name, value)| {
+                            if name.starts_with("section_") {
+                                value.first().map(|x| x.1.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
+
+                    completion_items.extend(items);
+                }
+            }
         }
 
         Ok(Some(CompletionResponse::Array(completion_items)))

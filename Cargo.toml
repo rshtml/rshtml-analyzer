@@ -12,5 +12,5 @@ tree-sitter-rshtml = { path = "../tree-sitter-rshtml" }
 #tree-sitter-html = "0.23.2"
 tree-sitter-rust = "0.24.0"
 tracing = { version = "0.1.41", features = ["release_max_level_info"] }
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing-subscriber = "0.3.19"
 toml = "0.8.23"

@@ -88,4 +88,29 @@ impl View {
                 .or_insert_with_key(|use_name| Self::use_directive_completion_item(use_name));
         }
     }
+
+    pub fn section_completion_item(section_name: &str) -> (char, CompletionItem) {
+        let at_item = CompletionItem {
+            label: format!("render({})", section_name),
+            kind: Some(CompletionItemKind::FUNCTION),
+            detail: Some(format!("{} section", section_name)),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            insert_text: Some("render(".to_string() + section_name + ")"),
+            sort_text: Some("01".to_string()),
+            ..Default::default()
+        };
+
+        ('@', at_item)
+    }
+
+    pub fn create_section_completion_items(&mut self) {
+        let section_names = &self.section_names;
+        for section_name in section_names {
+            let item = Self::section_completion_item(section_name);
+            self.completion_items
+                .entry(format!("section_{}", section_name.to_owned()))
+                .or_default()
+                .extend(vec![item]);
+        }
+    }
 }

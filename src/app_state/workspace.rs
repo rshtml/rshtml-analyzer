@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use toml::Value;
-use tracing::{debug, info};
+use tracing::debug;
 
 pub struct Workspace {
     pub root: PathBuf,
@@ -31,7 +31,7 @@ impl Workspace {
         let cargo_toml = fs::read_to_string(&root.join("Cargo.toml")).map_err(|e| e.to_string())?;
         let cargo_toml: Value = toml::from_str(&cargo_toml).map_err(|e| e.to_string())?;
 
-        info!("ROOT CARGO TOML: {}", cargo_toml);
+        //debug!("ROOT CARGO TOML: {}", cargo_toml);
 
         let member_paths = cargo_toml
             .get("workspace")
