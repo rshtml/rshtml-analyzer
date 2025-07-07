@@ -14,6 +14,7 @@ use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
 
 // TODO: use tree-sitter-rust for rust highlights - compile it with ast
+// TODO: test semantic_tokens_range
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -202,7 +203,6 @@ impl LanguageServer for Backend {
         views.remove(&uri_str);
     }
 
-    // TODO: implement semantic_token_full_delta and range
     async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
         let uri_str = params.text_document.uri.to_string();
         //let views = self.state.views.write().unwrap();
