@@ -16,7 +16,7 @@ use tracing::{debug, error};
 // TODO: Implement didchangedwatchedfiles event -- state te workspace index tut ve
 // TODO: sadece gerekli tanımlamaları hashmap te tut. component tanımlamaları, include yolları gibi.
 // TODO: Implement go to definition
-// TODO: Implement to send errors - textDocument/publishDiagnostics - self.client.publish_diagnostics()
+// TODO: use tree-sitter-rust for rust highlights - compile it with ast
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -102,7 +102,7 @@ impl LanguageServer for Backend {
         let section_names = tree.find_sections(&self.state.language, &text);
         debug!("Sections: {:?}", section_names);
 
-        {
+        let errors = {
             let mut view = View::new(text, tree, params.text_document.version as usize);
             view.layout_path = layout_path;
             view.include_paths = include_paths;
@@ -113,18 +113,16 @@ impl LanguageServer for Backend {
 
             let mut views = self.state.views.write().unwrap();
 
-            // for (p, v) in views.iter() {
-            //     debug!("Layout path AAA: {:?}", p);
-            //     if let Some(layout_path) = &v.layout_path
-            //         && layout_path.to_string_lossy().to_string() == *p
-            //     {
-            //         v.create_section_completion_items();
-            //         break;
-            //     }
-            // }
+            let errors = view.tree.find_error(&self.state.language, &view.source);
 
             views.insert(uri_str, view);
-        }
+
+            errors
+        };
+
+        self.client
+            .publish_diagnostics(params.text_document.uri, errors, Some(params.text_document.version))
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -163,23 +161,31 @@ impl LanguageServer for Backend {
             return;
         };
 
-        let mut views = self.state.views.write().unwrap();
-        let view = views.get_mut(&uri_str).unwrap();
+        let errors = {
+            let mut views = self.state.views.write().unwrap();
+            let view = views.get_mut(&uri_str).unwrap();
 
-        let extends = tree.find_extends(&self.state.language, &view.source);
-        let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
+            let extends = tree.find_extends(&self.state.language, &view.source);
+            let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
 
-        let include_paths = tree.find_includes(&self.state.language, &view.source);
-        let use_directives = tree.find_uses(&self.state.language, &view.source);
-        let section_names = tree.find_sections(&self.state.language, &view.source);
+            let include_paths = tree.find_includes(&self.state.language, &view.source);
+            let use_directives = tree.find_uses(&self.state.language, &view.source);
+            let section_names = tree.find_sections(&self.state.language, &view.source);
 
-        view.version = params.text_document.version as usize;
-        view.tree = tree;
-        view.layout_path = layout_path;
-        view.include_paths = include_paths;
-        view.use_directives = use_directives;
-        view.update_use_directive_completion_items();
-        view.section_names = section_names;
+            view.version = params.text_document.version as usize;
+            view.tree = tree;
+            view.layout_path = layout_path;
+            view.include_paths = include_paths;
+            view.use_directives = use_directives;
+            view.update_use_directive_completion_items();
+            view.section_names = section_names;
+
+            view.tree.find_error(&self.state.language, &view.source)
+        };
+
+        self.client
+            .publish_diagnostics(params.text_document.uri, errors, Some(params.text_document.version))
+            .await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {

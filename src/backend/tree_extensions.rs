@@ -1,5 +1,7 @@
-use tracing::error;
-use tree_sitter::{Language, Query, QueryCursor, QueryMatch, StreamingIterator};
+use tower_lsp::lsp_types;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tracing::{debug, error};
+use tree_sitter::{Language, Query, QueryCursor, QueryMatch, Range, StreamingIterator};
 
 pub trait TreeExtensions {
     const STRING_TRIMS: &'_ [char] = &[' ', '\'', '"'];
@@ -15,6 +17,24 @@ pub trait TreeExtensions {
     fn find_extends(&self, language: &Language, source: &str) -> Option<Option<String>>;
 
     fn find_sections(&self, language: &Language, source: &str) -> Vec<String>;
+
+    //fn find_missing(&self, language: &Language, source: &str);
+    fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic>;
+
+    fn from_range(range: Range) -> lsp_types::Range {
+        let start_point = range.start_point;
+        let end_point = range.end_point;
+        lsp_types::Range {
+            start: lsp_types::Position {
+                line: start_point.row as u32,
+                character: start_point.column as u32,
+            },
+            end: lsp_types::Position {
+                line: end_point.row as u32,
+                character: end_point.column as u32,
+            },
+        }
+    }
 }
 
 impl TreeExtensions for tree_sitter::Tree {
@@ -124,6 +144,64 @@ impl TreeExtensions for tree_sitter::Tree {
         })
         .unwrap_or_else(|x| {
             error!("Error during include path query: {}", x);
+            vec![]
+        })
+    }
+
+    // fn find_missing(&self, language: &Language, source: &str) {
+    //     let query_str = "(MISSING) @missing";
+    //     let hold = self
+    //         .find(language, query_str, &source, |x| {
+    //             let a = x.captures.first().unwrap();
+    //             let b = a.node.parent().unwrap().start_position();
+    //             let c = a.node.parent().unwrap().end_position();
+    //             let d = a.node.parent().map(|p| p.kind());
+    //
+    //             Some((b, c, d))
+    //         })
+    //         .unwrap();
+    //
+    //     debug!("Missing: {:?}", hold);
+    // }
+
+    fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic> {
+        let query_str = "[(ERROR) @error (MISSING) @missing]";
+        self.find(language, query_str, &source, |x| {
+            let node = x.captures.first()?.node;
+
+            let range = if node.is_missing() {
+                node.parent().map_or(node.range(), |parent| parent.range())
+            } else {
+                node.range()
+            };
+
+            let range = Self::from_range(range);
+            let severity = Some(DiagnosticSeverity::ERROR);
+
+            let message = if node.is_missing() {
+                format!("Missing `{}`", node.kind().replace('_', " "))
+            } else {
+                format!("Syntax error in `{}`", node.utf8_text(source.as_bytes()).ok()?)
+            };
+
+            debug!(
+                "Error: {}, {:?}, {:?}",
+                message,
+                (range.start.line, range.start.character),
+                (range.end.line, range.end.character)
+            );
+
+            let diagnostic = Diagnostic {
+                range,
+                message,
+                severity,
+                ..Default::default()
+            };
+
+            Some(diagnostic)
+        })
+        .unwrap_or_else(|err| {
+            error!("Error during error query: {}", err);
             vec![]
         })
     }
