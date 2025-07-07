@@ -1,5 +1,6 @@
 use crate::backend::semantic_tokens_builder::SemanticTokensBuilder;
 use std::collections::HashMap;
+use std::ops::Range;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::SemanticToken;
 use tree_sitter_highlight::{Highlight, HighlightEvent};
@@ -11,20 +12,25 @@ pub fn process_highlights(
     highlights: impl Iterator<Item = Result<HighlightEvent, tree_sitter_highlight::Error>>,
     highlight_names: &[&str],
     token_type_map: &HashMap<&'static str, u32>,
+    range: Option<Range<usize>>,
 ) -> Result<Vec<SemanticToken>, Error> {
     let mut builder = SemanticTokensBuilder::new();
     let mut highlight_stack: Vec<Highlight> = Vec::new();
 
     // Byte offset'ten (satır, sütun)'a çevirme işlemini verimli kılmak için
     // satır başlangıçlarının byte offset'lerini önceden hesaplayalım.
-    let line_starts: Vec<usize> = std::iter::once(0)
-        .chain(source.match_indices('\n').map(|(i, _)| i + 1))
-        .collect();
+    let line_starts: Vec<usize> = std::iter::once(0).chain(source.match_indices('\n').map(|(i, _)| i + 1)).collect();
 
     for event_result in highlights {
         if let Ok(event) = event_result {
             match event {
                 HighlightEvent::Source { start, end } => {
+                    if let Some(ref r) = range {
+                        // Check for overlap: [start, end) and [r.start, r.end)
+                        if start >= r.end || end <= r.start {
+                            continue; // No overlap, skip this event                                          
+                        }
+                    }
                     if let Some(highlight_id) = highlight_stack.last() {
                         //let hi = highlight_id.0;
                         //println!("highlight_id: {}, start: {}, end: {}", hi, start, end);
@@ -72,11 +78,7 @@ pub fn process_highlights(
 }
 
 /// GEREKLİ: Tree-sitter highlight adını LSP token türüne çevirir.
-fn map_highlight_to_lsp_type(
-    highlight_id: Highlight,
-    highlight_names: &[&str],
-    token_type_map: &HashMap<&'static str, u32>,
-) -> u32 {
+fn map_highlight_to_lsp_type(highlight_id: Highlight, highlight_names: &[&str], token_type_map: &HashMap<&'static str, u32>) -> u32 {
     let highlight_name = &highlight_names[highlight_id.0];
     //tracing::info!("Highlight yakalandı: '{}'", highlight_name);
 
@@ -100,19 +102,19 @@ fn map_highlight_to_lsp_type(
             } else {
                 "function"
             }
-        },
+        }
         "variable" => {
             if *highlight_name == "variable.parameter" {
                 "parameter"
             } else {
                 "variable"
             }
-        },
+        }
         "constant" | "boolean" => "variable",
         "attribute" | "tag" => "decorator",
         "label" => "namespace",
         "punctuation" => "operator",
-        _ => "variable"
+        _ => "variable",
     };
 
     token_type_map.get(lsp_type_name).copied().unwrap_or(1)

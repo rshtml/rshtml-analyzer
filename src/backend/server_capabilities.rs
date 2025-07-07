@@ -1,9 +1,6 @@
 use tower_lsp::lsp_types::{
-    OneOf,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend,
-    SemanticTokensOptions, SemanticTokensServerCapabilities, WorkDoneProgressOptions
-    , WorkspaceFoldersServerCapabilities,
-    WorkspaceServerCapabilities,
+    OneOf, SemanticTokenModifier, SemanticTokenType, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+    SemanticTokensServerCapabilities, WorkDoneProgressOptions, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 
 pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities> {
@@ -52,16 +49,12 @@ pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities
         ],
     };
 
-    let semantic_tokens_provider = Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
-        SemanticTokensOptions {
-            work_done_progress_options: WorkDoneProgressOptions {
-                work_done_progress: None,
-            },
-            legend,
-            range: Some(false),
-            full: Some(SemanticTokensFullOptions::Delta { delta: Some(false) }),
-        },
-    ));
+    let semantic_tokens_provider = Some(SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+        work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
+        legend,
+        range: Some(true),
+        full: Some(SemanticTokensFullOptions::Bool(true)),
+    }));
 
     semantic_tokens_provider
 }

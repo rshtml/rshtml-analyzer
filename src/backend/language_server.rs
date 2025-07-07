@@ -3,19 +3,16 @@ use crate::backend::Backend;
 use crate::backend::process_highlights::process_highlights;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
-use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
-    SemanticTokens, SemanticTokensParams, SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind,
+    CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
+    InitializedParams, MessageType, SemanticTokens, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
+    SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
+use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
 
-// TODO: Implement didchangedwatchedfiles event -- state te workspace index tut ve
-// TODO: sadece gerekli tanımlamaları hashmap te tut. component tanımlamaları, include yolları gibi.
-// TODO: Implement go to definition
 // TODO: use tree-sitter-rust for rust highlights - compile it with ast
 
 #[tower_lsp::async_trait]
@@ -44,6 +41,14 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::INCREMENTAL)),
+                // text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
+                //     open_close: Some(true),
+                //     change: Some(TextDocumentSyncKind::INCREMENTAL),
+                //     will_save: Some(true),
+                //     will_save_wait_until: Some(true),
+                //     save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions { include_text: Some(false) })),
+                // })),
+                //document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
@@ -200,36 +205,85 @@ impl LanguageServer for Backend {
     // TODO: implement semantic_token_full_delta and range
     async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
         let uri_str = params.text_document.uri.to_string();
-        let views = self.state.views.write().unwrap();
+        //let views = self.state.views.write().unwrap();
 
-        let view = views.get(&uri_str).ok_or(Error::new(ErrorCode::InvalidParams))?;
+        if let Ok(views) = self.state.views.write()
+            && let Some(view) = views.get(&uri_str)
+        {
+            //debug!("Highlights source: {}", view.source);
+            let highlight = &self.state.highlight;
 
-        //debug!("Highlights source: {}", view.source);
-        let highlight = &self.state.highlight;
+            if let Ok(mut highlighter) = self.state.highlight.highlighter.lock() {
+                let highlight_events = highlighter
+                    .highlight(&highlight.highlight_config, view.source.as_bytes(), None, |lang_name| {
+                        highlight.highlight_injects.get(lang_name)
+                    })
+                    .map_err(|e| {
+                        error!("Error during highlighting: {}", e);
+                        Error::new(ErrorCode::InternalError)
+                    })?;
 
-        let mut highlighter = self.state.highlight.highlighter.lock().unwrap();
-        let highlight_events = highlighter
-            .highlight(&highlight.highlight_config, view.source.as_bytes(), None, |lang_name| {
-                highlight.highlight_injects.get(lang_name)
-            })
-            .map_err(|e| {
-                error!("Error during highlighting: {}", e);
-                Error::new(ErrorCode::InternalError)
-            })?;
+                let highlight_names: Vec<&str> = highlight.highlight_names.iter().map(|s| s.as_str()).collect();
 
-        let highlight_names: Vec<&str> = highlight.highlight_names.iter().map(|s| s.as_str()).collect();
+                let tokens = process_highlights(&view.source, highlight_events, &highlight_names, &highlight.token_type_map, None)?;
 
-        let tokens = process_highlights(&view.source, highlight_events, &highlight_names, &highlight.token_type_map)?;
+                debug!("Semantic Tokens: {:?}", tokens.len());
 
-        //debug!("Tokens: {:?}", tokens);
+                return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                    result_id: None,
+                    data: tokens,
+                })));
+            }
+        }
 
-        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-            result_id: None,
-            data: tokens,
-        })))
+        Ok(None)
     }
 
-    async fn completion(&self, params: CompletionParams) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
+    async fn semantic_tokens_range(&self, params: SemanticTokensRangeParams) -> jsonrpc::Result<Option<SemanticTokensRangeResult>> {
+        let uri_str = params.text_document.uri.to_string();
+        let range = params.range;
+
+        if let Ok(views) = self.state.views.write()
+            && let Some(view) = views.get(&uri_str)
+        {
+            let highlight = &self.state.highlight;
+
+            if let Ok(mut highlighter) = self.state.highlight.highlighter.lock() {
+                let start_byte = Self::position_to_byte_offset(&view.source, range.start);
+                let end_byte = Self::position_to_byte_offset(&view.source, range.end);
+
+                let highlight_events = highlighter
+                    .highlight(&highlight.highlight_config, view.source.as_bytes(), None, |lang_name| {
+                        highlight.highlight_injects.get(lang_name)
+                    })
+                    .map_err(|e| {
+                        error!("Error during highlighting: {}", e);
+                        Error::new(ErrorCode::InternalError)
+                    })?;
+
+                let highlight_names: Vec<&str> = highlight.highlight_names.iter().map(|s| s.as_str()).collect();
+
+                let tokens = process_highlights(
+                    &view.source,
+                    highlight_events,
+                    &highlight_names,
+                    &highlight.token_type_map,
+                    Some(start_byte..end_byte),
+                )?;
+
+                debug!("Semantic Tokens Range: {:?}", tokens.len());
+
+                return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+                    result_id: None,
+                    data: tokens,
+                })));
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn completion(&self, params: CompletionParams) -> jsonrpc::Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let trigger_char = params.context.and_then(|ctx| ctx.trigger_character).and_then(|s| s.chars().next());
 
@@ -281,7 +335,10 @@ impl LanguageServer for Backend {
             }
         }
 
-        Ok(Some(CompletionResponse::Array(completion_items)))
+        Ok(Some(CompletionResponse::List(CompletionList {
+            is_incomplete: true,
+            items: completion_items,
+        })))
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
@@ -293,8 +350,7 @@ impl LanguageServer for Backend {
 
         debug!("Cargo.toml changed. Re-analyzing...");
 
-        {
-            let mut workspace = self.state.workspace.write().unwrap();
+        if let Ok(mut workspace) = self.state.workspace.write() {
             let root = workspace.root.clone();
             workspace.load(&root).unwrap_or_else(|e| {
                 debug!("Workspace couldn't load: {}", e);

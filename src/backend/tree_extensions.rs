@@ -1,6 +1,6 @@
 use tower_lsp::lsp_types;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
-use tracing::{debug, error};
+use tracing::error;
 use tree_sitter::{Language, Query, QueryCursor, QueryMatch, Range, StreamingIterator};
 
 pub trait TreeExtensions {
@@ -18,7 +18,6 @@ pub trait TreeExtensions {
 
     fn find_sections(&self, language: &Language, source: &str) -> Vec<String>;
 
-    //fn find_missing(&self, language: &Language, source: &str);
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic>;
 
     fn from_range(range: Range) -> lsp_types::Range {
@@ -148,22 +147,6 @@ impl TreeExtensions for tree_sitter::Tree {
         })
     }
 
-    // fn find_missing(&self, language: &Language, source: &str) {
-    //     let query_str = "(MISSING) @missing";
-    //     let hold = self
-    //         .find(language, query_str, &source, |x| {
-    //             let a = x.captures.first().unwrap();
-    //             let b = a.node.parent().unwrap().start_position();
-    //             let c = a.node.parent().unwrap().end_position();
-    //             let d = a.node.parent().map(|p| p.kind());
-    //
-    //             Some((b, c, d))
-    //         })
-    //         .unwrap();
-    //
-    //     debug!("Missing: {:?}", hold);
-    // }
-
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic> {
         let query_str = "[(ERROR) @error (MISSING) @missing]";
         self.find(language, query_str, &source, |x| {
@@ -183,13 +166,6 @@ impl TreeExtensions for tree_sitter::Tree {
             } else {
                 format!("Syntax error in `{}`", node.utf8_text(source.as_bytes()).ok()?)
             };
-
-            debug!(
-                "Error: {}, {:?}, {:?}",
-                message,
-                (range.start.line, range.start.character),
-                (range.end.line, range.end.character)
-            );
 
             let diagnostic = Diagnostic {
                 range,
