@@ -131,7 +131,7 @@ impl AppState {
             label: "match".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
             insert_text: Some(
-                "match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t}\n}".to_string(),
+                "match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string(),
             ),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("match statement".to_string()),
