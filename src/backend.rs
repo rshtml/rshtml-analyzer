@@ -6,8 +6,8 @@ mod tree_extensions;
 
 use crate::app_state::AppState;
 use std::path::PathBuf;
-use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
 use tower_lsp::Client;
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
 use tree_sitter::{Point, Tree};
 
 pub struct Backend {
@@ -21,42 +21,26 @@ impl Backend {
     }
 
     fn position_to_byte_offset(text: &str, position: Position) -> usize {
-        let mut line_counter = 0;
-        let mut character_counter = 0;
+        let mut line = 0;
+        let mut character = 0;
 
-        // Metnin karakterleri ve onların bayt ofsetleri üzerinde doğrudan gezinelim.
-        for (current_byte_offset, ch) in text.char_indices() {
-            // Hedef satıra geldik mi?
-            if line_counter == position.line {
-                // Hedef karaktere geldik mi?
-                if character_counter == position.character {
-                    // Evet, bu karakterin başlangıç bayt ofsetini döndür.
-                    return current_byte_offset;
-                }
-                // Henüz hedef karaktere gelmedik, saymaya devam.
-                character_counter += 1;
+        for (byte_offset, ch) in text.char_indices() {
+            if line == position.line && character == position.character {
+                return byte_offset;
             }
 
-            // Yeni bir satıra geçiyorsak sayaçları sıfırla.
             if ch == '\n' {
-                line_counter += 1;
-                // Hedef satıra yeni geçtiysek, karakter sayacı 0 olmalı.
-                if line_counter == position.line {
-                    character_counter = 0;
-                }
+                line += 1;
+                character = 0;
+            } else if ch != '\r' {
+                character += 1;
             }
         }
 
-        // Eğer döngü bittiğinde hala hedef pozisyona ulaşamadıysak,
-        // bu, pozisyonun metnin son karakterinden sonra olduğu anlamına gelir.
-        // (Örneğin, bir satırın sonuna yeni bir karakter ekleme durumu).
-        // Bu durumda, metnin toplam uzunluğu doğru bayt ofsetidir.
-        if line_counter == position.line && character_counter == position.character {
+        if line == position.line && character == position.character {
             return text.len();
         }
 
-        // Eğer istenen satır metinde hiç yoksa (örn. boş dosyada 5. satır istenirse),
-        // yine de metnin sonunu döndürmek en güvenli seçenektir.
         text.len()
     }
 

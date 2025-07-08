@@ -5,8 +5,6 @@ use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::SemanticToken;
 use tree_sitter_highlight::{Highlight, HighlightEvent};
 
-/// Tree-sitter highlight olaylarını, verilen basit SemanticTokensBuilder kullanarak
-/// LSP Semantic Token'larına dönüştürür.
 pub fn process_highlights(
     source: &str,
     highlights: impl Iterator<Item = Result<HighlightEvent, tree_sitter_highlight::Error>>,

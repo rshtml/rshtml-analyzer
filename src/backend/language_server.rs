@@ -15,6 +15,7 @@ use tracing::{debug, error};
 
 // TODO: use tree-sitter-rust for rust highlights - compile it with ast
 // TODO: test semantic_tokens_range
+// TODO: tree-sitter da match virgülsüz hata veriyor!
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
