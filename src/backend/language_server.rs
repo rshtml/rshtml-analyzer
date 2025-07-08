@@ -181,10 +181,11 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let msg = format!("Closed file: {}", &params.text_document.uri);
         self.client.log_message(MessageType::INFO, msg).await;
-
-        let mut views = self.state.views.write().unwrap();
         let uri_str = params.text_document.uri.to_string();
-        views.remove(&uri_str);
+
+        if let Ok(mut views) = self.state.views.write() {
+            views.remove(&uri_str);
+        }
     }
 
     async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
@@ -235,58 +236,62 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position.text_document.uri;
         let trigger_char = params.context.and_then(|ctx| ctx.trigger_character).and_then(|s| s.chars().next());
 
-        let views = self.state.views.read().unwrap();
-        let view = views.get(&uri.to_string()).ok_or(Error::new(ErrorCode::InvalidParams))?;
+        if let Ok(views) = self.state.views.read()
+            && let Some(view) = views.get(&uri.to_string())
+        {
+            let mut completion_items: Vec<CompletionItem> = Vec::new();
 
-        let mut completion_items: Vec<CompletionItem> = Vec::new();
+            if let Some(tc) = trigger_char {
+                for items in view.completion_items.values() {
+                    for (item_char, item) in items {
+                        if *item_char == tc {
+                            completion_items.push(item.clone());
+                        }
+                    }
+                }
 
-        if let Some(tc) = trigger_char {
-            for items in view.completion_items.values() {
-                for (item_char, item) in items {
-                    if *item_char == tc {
+                if tc == '@' {
+                    completion_items.extend(self.state.completion_items.clone());
+                }
+            } else {
+                for items in view.completion_items.values() {
+                    for (_, item) in items {
                         completion_items.push(item.clone());
+                    }
+                }
+
+                completion_items.extend(self.state.completion_items.clone());
+            }
+
+            if Some('@') == trigger_char || None == trigger_char {
+                for v in views.values() {
+                    let is_layout = uri.to_file_path().map(|x| v.layout_path == Some(x)).unwrap_or(false);
+                    if is_layout {
+                        let items = v
+                            .completion_items
+                            .iter()
+                            .filter_map(|(name, value)| {
+                                if name.starts_with("section_") {
+                                    value.first().map(|x| x.1.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+
+                        completion_items.extend(items);
                     }
                 }
             }
 
-            if tc == '@' {
-                completion_items.extend(self.state.completion_items.clone());
-            }
-        } else {
-            for items in view.completion_items.values() {
-                for (_, item) in items {
-                    completion_items.push(item.clone());
-                }
-            }
-
-            completion_items.extend(self.state.completion_items.clone());
+            return Ok(Some(CompletionResponse::List(CompletionList {
+                is_incomplete: true,
+                items: completion_items,
+            })));
         }
 
-        if Some('@') == trigger_char || None == trigger_char {
-            for v in views.values() {
-                let is_layout = uri.to_file_path().map(|x| v.layout_path == Some(x)).unwrap_or(false);
-                if is_layout {
-                    let items = v
-                        .completion_items
-                        .iter()
-                        .filter_map(|(name, value)| {
-                            if name.starts_with("section_") {
-                                value.first().map(|x| x.1.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>();
-
-                    completion_items.extend(items);
-                }
-            }
-        }
-
-        Ok(Some(CompletionResponse::List(CompletionList {
-            is_incomplete: true,
-            items: completion_items,
-        })))
+        debug!("Error while getting completion items");
+        Ok(None)
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
