@@ -81,12 +81,9 @@ impl LanguageServer for Backend {
         let uri_str = params.text_document.uri.to_string();
         let text = params.text_document.text;
 
-        let tree = {
-            let mut parser = self.state.parser.lock().unwrap();
-            parser.parse(&text, None)
-        };
-
-        let tree = if let Some(tree) = tree {
+        let tree = if let Ok(mut parser) = self.state.parser.lock()
+            && let Some(tree) = parser.parse(&text, None)
+        {
             tree
         } else {
             self.client
@@ -136,57 +133,44 @@ impl LanguageServer for Backend {
         self.client.log_message(MessageType::INFO, msg).await;
 
         let uri_str = params.text_document.uri.to_string();
-        let tree = {
-            let mut views = self.state.views.write().unwrap();
-            let view = match views.get_mut(&uri_str) {
-                Some(v) => v,
-                None => {
-                    error!("Received change for untracked file: {}", uri_str);
-                    return;
-                }
-            };
 
+        let errors = if let Ok(mut views) = self.state.views.write()
+            && let Some(view) = views.get_mut(&uri_str)
+        {
             if view.version >= params.text_document.version as usize {
                 return;
             }
 
             self.process_changes(params.content_changes, &mut view.source, &mut view.tree);
 
+            if let Ok(mut parser) = self.state.parser.lock()
+                && let Some(tree) = parser.parse(&view.source, Some(&view.tree))
             {
-                let mut parser = self.state.parser.lock().unwrap();
-                parser.parse(&view.source, Some(&view.tree))
+                let extends = tree.find_extends(&self.state.language, &view.source);
+                let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
+
+                let include_paths = tree.find_includes(&self.state.language, &view.source);
+                let use_directives = tree.find_uses(&self.state.language, &view.source);
+                let section_names = tree.find_sections(&self.state.language, &view.source);
+
+                view.version = params.text_document.version as usize;
+                view.tree = tree;
+                view.layout_path = layout_path;
+                view.include_paths = include_paths;
+                view.use_directives = use_directives;
+                view.update_use_directive_completion_items();
+                view.section_names = section_names;
+
+                let errors = view.tree.find_error(&self.state.language, &view.source);
+
+                errors
+            } else {
+                error!("Error while parsing tree");
+                return;
             }
-        };
-
-        let tree = if let Some(tree) = tree {
-            tree
         } else {
-            self.client
-                .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
-                .await;
+            error!("Error while locked views");
             return;
-        };
-
-        let errors = {
-            let mut views = self.state.views.write().unwrap();
-            let view = views.get_mut(&uri_str).unwrap();
-
-            let extends = tree.find_extends(&self.state.language, &view.source);
-            let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
-
-            let include_paths = tree.find_includes(&self.state.language, &view.source);
-            let use_directives = tree.find_uses(&self.state.language, &view.source);
-            let section_names = tree.find_sections(&self.state.language, &view.source);
-
-            view.version = params.text_document.version as usize;
-            view.tree = tree;
-            view.layout_path = layout_path;
-            view.include_paths = include_paths;
-            view.use_directives = use_directives;
-            view.update_use_directive_completion_items();
-            view.section_names = section_names;
-
-            view.tree.find_error(&self.state.language, &view.source)
         };
 
         self.client
