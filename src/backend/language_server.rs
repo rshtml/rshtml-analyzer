@@ -1,6 +1,5 @@
 use crate::app_state::view::View;
 use crate::backend::Backend;
-use crate::backend::process_highlights::process_highlights;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
@@ -213,28 +212,14 @@ impl LanguageServer for Backend {
         {
             //debug!("Highlights source: {}", view.source);
             let highlight = &self.state.highlight;
+            let tokens = highlight.highlight(&view.source, None)?;
 
-            if let Ok(mut highlighter) = self.state.highlight.highlighter.lock() {
-                let highlight_events = highlighter
-                    .highlight(&highlight.highlight_config, view.source.as_bytes(), None, |lang_name| {
-                        highlight.highlight_injects.get(lang_name)
-                    })
-                    .map_err(|e| {
-                        error!("Error during highlighting: {}", e);
-                        Error::new(ErrorCode::InternalError)
-                    })?;
+            debug!("Semantic Tokens: {:?}", tokens.len());
 
-                let highlight_names: Vec<&str> = highlight.highlight_names.iter().map(|s| s.as_str()).collect();
-
-                let tokens = process_highlights(&view.source, highlight_events, &highlight_names, &highlight.token_type_map, None)?;
-
-                debug!("Semantic Tokens: {:?}", tokens.len());
-
-                return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-                    result_id: None,
-                    data: tokens,
-                })));
-            }
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: tokens,
+            })));
         }
 
         Ok(None)
@@ -248,39 +233,17 @@ impl LanguageServer for Backend {
             && let Some(view) = views.get(&uri_str)
         {
             let highlight = &self.state.highlight;
+            let start_byte = Self::position_to_byte_offset(&view.source, range.start);
+            let end_byte = Self::position_to_byte_offset(&view.source, range.end);
+            let tokens = highlight.highlight(&view.source, Some(start_byte..end_byte))?;
 
-            if let Ok(mut highlighter) = self.state.highlight.highlighter.lock() {
-                let start_byte = Self::position_to_byte_offset(&view.source, range.start);
-                let end_byte = Self::position_to_byte_offset(&view.source, range.end);
+            debug!("Semantic Tokens Range: {:?}", tokens.len());
 
-                let highlight_events = highlighter
-                    .highlight(&highlight.highlight_config, view.source.as_bytes(), None, |lang_name| {
-                        highlight.highlight_injects.get(lang_name)
-                    })
-                    .map_err(|e| {
-                        error!("Error during highlighting: {}", e);
-                        Error::new(ErrorCode::InternalError)
-                    })?;
-
-                let highlight_names: Vec<&str> = highlight.highlight_names.iter().map(|s| s.as_str()).collect();
-
-                let tokens = process_highlights(
-                    &view.source,
-                    highlight_events,
-                    &highlight_names,
-                    &highlight.token_type_map,
-                    Some(start_byte..end_byte),
-                )?;
-
-                debug!("Semantic Tokens Range: {:?}", tokens.len());
-
-                return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
-                    result_id: None,
-                    data: tokens,
-                })));
-            }
+            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+                result_id: None,
+                data: tokens,
+            })));
         }
-
         Ok(None)
     }
 

@@ -1,5 +1,4 @@
 mod language_server;
-pub mod process_highlights;
 pub mod semantic_tokens_builder;
 mod server_capabilities;
 mod tree_extensions;
