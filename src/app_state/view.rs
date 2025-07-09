@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens};
 use tree_sitter::Tree;
 
 pub struct View {
@@ -11,6 +11,8 @@ pub struct View {
     pub use_directives: Vec<(String, Option<String>)>,
     pub section_names: Vec<String>,
     pub completion_items: HashMap<String, Vec<(char, CompletionItem)>>,
+    pub semantic_tokens: SemanticTokens,
+    pub semantic_tokens_version: u64,
 
     pub version: usize,
 }
@@ -25,6 +27,8 @@ impl View {
             use_directives: Vec::new(),
             section_names: Vec::new(),
             completion_items: HashMap::new(),
+            semantic_tokens: SemanticTokens::default(),
+            semantic_tokens_version: 0,
             version,
         }
     }

@@ -2,8 +2,14 @@ use crate::app_state::view::View;
 use crate::backend::Backend;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
-use tower_lsp::jsonrpc::{Error};
-use tower_lsp::lsp_types::{CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType, SemanticTokens, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind};
+use tower_lsp::jsonrpc::Error;
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
+    InitializedParams, MessageType, SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams,
+    SemanticTokensFullDeltaResult, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+};
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
 
@@ -93,8 +99,7 @@ impl LanguageServer for Backend {
         debug!("Use directives: {:?}", use_directives);
 
         let extends = tree.find_extends(&self.state.language, &text);
-        let layout_path = extends.and_then(|extends|
-            self.state.find_layout(&params.text_document.uri, extends.as_deref()));
+        let layout_path = extends.and_then(|extends| self.state.find_layout(&params.text_document.uri, extends.as_deref()));
         debug!("Layout path: {:?}", layout_path);
 
         let section_names = tree.find_sections(&self.state.language, &text);
@@ -142,8 +147,7 @@ impl LanguageServer for Backend {
                 && let Some(tree) = parser.parse(&view.source, Some(&view.tree))
             {
                 let extends = tree.find_extends(&self.state.language, &view.source);
-                let layout_path = extends.and_then(|extends|
-                    self.state.find_layout(&params.text_document.uri, extends.as_deref()));
+                let layout_path = extends.and_then(|extends| self.state.find_layout(&params.text_document.uri, extends.as_deref()));
 
                 let include_paths = tree.find_includes(&self.state.language, &view.source);
                 let use_directives = tree.find_uses(&self.state.language, &view.source);
@@ -187,17 +191,65 @@ impl LanguageServer for Backend {
     async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
         let uri_str = params.text_document.uri.to_string();
 
-        if let Ok(views) = self.state.views.write()
-            && let Some(view) = views.get(&uri_str)
+        if let Ok(mut views) = self.state.views.write()
+            && let Some(view) = views.get_mut(&uri_str)
         {
             let highlight = &self.state.highlight;
             let tokens = highlight.highlight(&view.source, None)?;
 
             debug!("Semantic Tokens: {:?}", tokens.len());
 
-            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-                result_id: None,
+            view.semantic_tokens_version += 1;
+
+            let semantic_tokens = SemanticTokens {
+                result_id: Some(view.semantic_tokens_version.to_string()),
                 data: tokens,
+            };
+            view.semantic_tokens = semantic_tokens.clone();
+
+            return Ok(Some(SemanticTokensResult::Tokens(semantic_tokens)));
+        }
+
+        Ok(None)
+    }
+
+    async fn semantic_tokens_full_delta(
+        &self,
+        params: SemanticTokensDeltaParams,
+    ) -> jsonrpc::Result<Option<SemanticTokensFullDeltaResult>> {
+        let uri_str = params.text_document.uri.to_string();
+        let result_id = params.previous_result_id;
+
+        if let Ok(mut views) = self.state.views.write()
+            && let Some(view) = views.get_mut(&uri_str)
+        {
+            let highlight = &self.state.highlight;
+            let tokens = highlight.highlight(&view.source, None)?;
+
+            if view.semantic_tokens.result_id.as_ref() != Some(&result_id) {
+                debug!("Semantic Tokens Delta | Full: {:?}", tokens.len());
+                view.semantic_tokens_version += 1;
+                let semantic_tokens = SemanticTokens {
+                    result_id: Some(view.semantic_tokens_version.to_string()),
+                    data: tokens.clone(),
+                };
+                view.semantic_tokens = semantic_tokens.clone();
+                return Ok(Some(SemanticTokensFullDeltaResult::Tokens(semantic_tokens)));
+            }
+
+            let tokens_diff = highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
+
+            debug!("Semantic Tokens Delta: {:?}", tokens_diff.len());
+
+            view.semantic_tokens_version += 1;
+            view.semantic_tokens = SemanticTokens {
+                result_id: Some(view.semantic_tokens_version.to_string()),
+                data: tokens.clone(),
+            };
+
+            return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
+                result_id: Some(view.semantic_tokens_version.to_string()),
+                edits: tokens_diff,
             })));
         }
 

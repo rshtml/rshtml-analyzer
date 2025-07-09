@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
-use tower_lsp::lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType};
+use tower_lsp::lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensEdit};
 use tracing::error;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -163,5 +163,33 @@ impl Highlight {
         let col = source[line_start_byte..byte_offset].encode_utf16().count();
 
         (line as u32, col as u32)
+    }
+
+    pub fn semantic_tokens_difference(&self, old_tokens: &[SemanticToken], new_tokens: &[SemanticToken]) -> Vec<SemanticTokensEdit> {
+        if old_tokens == new_tokens {
+            return vec![];
+        }
+
+        let common_prefix_len = old_tokens.iter().zip(new_tokens.iter()).take_while(|(old, new)| old == new).count();
+
+        let common_suffix_len = old_tokens[common_prefix_len..]
+            .iter()
+            .rev()
+            .zip(new_tokens[common_prefix_len..].iter().rev())
+            .take_while(|(old, new)| old == new)
+            .count();
+
+        let start = common_prefix_len as u32;
+
+        let delete_count = (old_tokens.len() - common_prefix_len - common_suffix_len) as u32;
+
+        let new_data_slice = &new_tokens[common_prefix_len..(new_tokens.len() - common_suffix_len)];
+        let data = if new_data_slice.is_empty() {
+            None
+        } else {
+            Some(new_data_slice.to_vec())
+        };
+
+        vec![SemanticTokensEdit { start, delete_count, data }]
     }
 }
