@@ -4,9 +4,8 @@ mod server_capabilities;
 mod tree_extensions;
 
 use crate::app_state::AppState;
-use std::path::PathBuf;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent};
 use tree_sitter::{Point, Tree};
 
 pub struct Backend {
@@ -90,18 +89,5 @@ impl Backend {
                 break;
             }
         }
-    }
-
-    fn find_layout(&self, uri: &Url, layout_name: Option<&str>) -> Option<PathBuf> {
-        let file_path = uri.to_file_path().ok()?;
-
-        let workspace = self.state.workspace.read().unwrap();
-        layout_name
-            .and_then(|layout_name| {
-                let member = workspace.get_member_by_view(&file_path)?;
-                let layout_path = member.views_path.join(layout_name);
-                Some(layout_path)
-            })
-            .or_else(|| workspace.get_layout_path_by_view(&file_path))
     }
 }

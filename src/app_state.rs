@@ -1,13 +1,15 @@
 mod highlight;
-pub mod workspace;
 pub mod view;
+pub mod workspace;
 
 use crate::app_state::highlight::Highlight;
 use crate::app_state::view::View;
 use crate::app_state::workspace::Workspace;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Url};
+use tracing::debug;
 use tree_sitter::{Language, Parser};
 use tree_sitter_highlight::HighlightConfiguration;
 
@@ -21,12 +23,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(
-        parser: Parser,
-        highlight: Highlight,
-        completion_items: Vec<CompletionItem>,
-        language: Language,
-    ) -> Self {
+    pub fn new(parser: Parser, highlight: Highlight, completion_items: Vec<CompletionItem>, language: Language) -> Self {
         Self {
             workspace: RwLock::new(Workspace::default()),
             parser: Mutex::new(parser),
@@ -72,16 +69,8 @@ impl AppState {
         // )
         // .unwrap();
 
-        let mut cn: HashSet<String> = highlight_config
-            .names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let cnr: HashSet<String> = highlight_config_rust
-            .names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let mut cn: HashSet<String> = highlight_config.names().iter().map(|s| s.to_string()).collect();
+        let cnr: HashSet<String> = highlight_config_rust.names().iter().map(|s| s.to_string()).collect();
         //let cnh: HashSet<String> = highlight_config_html.names().iter().map(|s| s.to_string()).collect();
 
         cn.extend(cnr);
@@ -94,9 +83,7 @@ impl AppState {
         //highlight_config_html.configure(final_capture_names.as_ref());
 
         let mut highlights = Highlight::new(highlight_config, final_capture_names.clone());
-        highlights
-            .highlight_injects
-            .insert("rust", highlight_config_rust);
+        highlights.highlight_injects.insert("rust", highlight_config_rust);
         //highlights.highlight_injects.insert("html", highlight_config_html);
 
         let state = Self::new(parser, highlights, Self::completion_items(), lang);
@@ -104,6 +91,23 @@ impl AppState {
         //println!("rshtml: {:?}", final_capture_names);
 
         state
+    }
+
+    pub fn find_layout(&self, uri: &Url, layout_name: Option<&str>) -> Option<PathBuf> {
+        let file_path = uri.to_file_path().ok()?;
+
+        if let Ok(workspace) = self.workspace.read() {
+            layout_name
+                .and_then(|layout_name| {
+                    let member = workspace.get_member_by_view(&file_path)?;
+                    let layout_path = member.views_path.join(layout_name);
+                    Some(layout_path)
+                })
+                .or_else(|| workspace.get_layout_path_by_view(&file_path))
+        } else {
+            debug!("workspace is not initialized or locked");
+            None
+        }
     }
 
     fn completion_items() -> Vec<CompletionItem> {
@@ -130,9 +134,7 @@ impl AppState {
         let match_ = CompletionItem {
             label: "match".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(
-                "match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string(),
-            ),
+            insert_text: Some("match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("match statement".to_string()),
             sort_text: Some("03".to_string()),
@@ -162,9 +164,7 @@ impl AppState {
         let use_as_ = CompletionItem {
             label: "use .. as".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(
-                r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string(),
-            ),
+            insert_text: Some(r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("use .. as directive".to_string()),
             sort_text: Some("06".to_string()),

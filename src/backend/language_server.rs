@@ -8,8 +8,6 @@ use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
 
 // TODO: use tree-sitter-rust for rust highlights - compile it with ast
-// TODO: test semantic_tokens_range
-// TODO: tree-sitter da match virgülsüz hata veriyor!
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -95,7 +93,8 @@ impl LanguageServer for Backend {
         debug!("Use directives: {:?}", use_directives);
 
         let extends = tree.find_extends(&self.state.language, &text);
-        let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
+        let layout_path = extends.and_then(|extends|
+            self.state.find_layout(&params.text_document.uri, extends.as_deref()));
         debug!("Layout path: {:?}", layout_path);
 
         let section_names = tree.find_sections(&self.state.language, &text);
@@ -143,7 +142,8 @@ impl LanguageServer for Backend {
                 && let Some(tree) = parser.parse(&view.source, Some(&view.tree))
             {
                 let extends = tree.find_extends(&self.state.language, &view.source);
-                let layout_path = extends.and_then(|extends| self.find_layout(&params.text_document.uri, extends.as_deref()));
+                let layout_path = extends.and_then(|extends|
+                    self.state.find_layout(&params.text_document.uri, extends.as_deref()));
 
                 let include_paths = tree.find_includes(&self.state.language, &view.source);
                 let use_directives = tree.find_uses(&self.state.language, &view.source);
@@ -186,12 +186,10 @@ impl LanguageServer for Backend {
 
     async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
         let uri_str = params.text_document.uri.to_string();
-        //let views = self.state.views.write().unwrap();
 
         if let Ok(views) = self.state.views.write()
             && let Some(view) = views.get(&uri_str)
         {
-            //debug!("Highlights source: {}", view.source);
             let highlight = &self.state.highlight;
             let tokens = highlight.highlight(&view.source, None)?;
 

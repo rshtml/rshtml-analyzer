@@ -1,44 +1,5 @@
 use tower_lsp::lsp_types::{SemanticTokenModifier, SemanticTokenType};
 
-// pub const TOKEN_TYPES_: [&str; 23] = [
-//     "namespace",
-//     "type",
-//     "class",
-//     "enum",
-//     "interface",
-//     "struct",
-//     "typeParameter",
-//     "parameter",
-//     "variable",
-//     "property",
-//     "enumMember",
-//     "event",
-//     "function",
-//     "method",
-//     "macro",
-//     "keyword",
-//     "modifier",
-//     "comment",
-//     "string",
-//     "number",
-//     "regexp",
-//     "operator",
-//     "decorator",
-// ];
-//
-// pub const TOKEN_MODIFIERS_: [&str; 10] = [
-//     "declaration",
-//     "definition",
-//     "readonly",
-//     "static",
-//     "deprecated",
-//     "abstract",
-//     "async",
-//     "modification",
-//     "documentation",
-//     "defaultLibrary",
-// ];
-
 pub const SEMANTIC_TOKEN_TYPES: [SemanticTokenType; 23] = [
     SemanticTokenType::NAMESPACE,
     SemanticTokenType::TYPE,

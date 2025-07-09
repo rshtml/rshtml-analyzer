@@ -1,7 +1,6 @@
 mod app_state;
 mod backend;
 mod consts;
-mod load_config;
 
 use crate::app_state::AppState;
 use crate::backend::Backend;

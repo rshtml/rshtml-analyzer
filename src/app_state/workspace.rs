@@ -31,8 +31,6 @@ impl Workspace {
         let cargo_toml = fs::read_to_string(&root.join("Cargo.toml")).map_err(|e| e.to_string())?;
         let cargo_toml: Value = toml::from_str(&cargo_toml).map_err(|e| e.to_string())?;
 
-        //debug!("ROOT CARGO TOML: {}", cargo_toml);
-
         let member_paths = cargo_toml
             .get("workspace")
             .and_then(|workspace| workspace.get("members").and_then(|members| members.as_array()))
@@ -66,7 +64,8 @@ impl Workspace {
                 views_path: root.join(views.0),
                 views_layout: views.1.to_string(),
             };
-            debug!("MEMBER PATH: {}", member.path.to_str().unwrap());
+            
+            debug!("MEMBER PATH: {}", member.path.to_string_lossy().to_string());
 
             new_workspace.members.push(member);
         }
@@ -89,28 +88,6 @@ impl Workspace {
             None => Ok((default_path, default_layout)),
         }
     }
-
-    // pub fn load_member_by_view(&self, view_path: &Path) -> Option<&Member> {
-    //     let mut manifest_path: PathBuf = view_path.to_path_buf();
-    //
-    //     for current_dir in view_path.ancestors() {
-    //         if current_dir.join("Cargo.toml").exists() {
-    //             manifest_path = current_dir.to_path_buf();
-    //         }
-    //
-    //         if current_dir == self.root {
-    //             return None;
-    //         }
-    //     }
-    //
-    //     for member in &self.members {
-    //         if member.path == manifest_path {
-    //             return Some(member);
-    //         }
-    //     }
-    //
-    //     None
-    // }
 
     pub fn get_member_by_view(&self, view_path: &Path) -> Option<&Member> {
         for member in &self.members {
