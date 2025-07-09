@@ -2,13 +2,8 @@ use crate::app_state::view::View;
 use crate::backend::Backend;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
-use tower_lsp::jsonrpc::{Error, ErrorCode};
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, MessageType, SemanticTokens, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
-    SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-};
+use tower_lsp::jsonrpc::{Error};
+use tower_lsp::lsp_types::{CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType, SemanticTokens, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind};
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
 
@@ -57,6 +52,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 workspace: workspace_capabilities(),
+                //position_encoding:Some(PositionEncodingKind::UTF8),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {

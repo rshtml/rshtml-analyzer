@@ -86,16 +86,10 @@ impl Highlight {
                         }
 
                         if let Some(highlight_id) = highlight_stack.last() {
-                            //let hi = highlight_id.0;
-                            //println!("highlight_id: {}, start: {}, end: {}", hi, start, end);
-                            // 1. Gerekli Çeviri: Tree-sitter ID'sini LSP türüne çevir.
                             let token_type = self.ts_highlight_to_lsp_type(*highlight_id);
 
-                            // 2. İsteğe Bağlı Özellik: Modifier'ları şimdilik atlıyoruz (0).
                             let token_modifiers = 0;
 
-                            // 3. Gerekli Çeviri: Byte offset'i satır ve sütuna çevir.
-                            // Çok satırlı token'ları doğru işlemek için metni satır satır gezelim.
                             let text_span = &source[start..end];
                             let (mut current_line, mut current_col) = self.byte_to_line_col(start, &line_starts, source);
 
@@ -109,10 +103,8 @@ impl Highlight {
                                     continue;
                                 }
 
-                                // LSP genellikle UTF-16 kod birimlerini sütun olarak sayar.
                                 let length = line_content.encode_utf16().count() as u32;
                                 builder.push_token(current_line, current_col, length, token_type, token_modifiers);
-                                // Bir sonraki token için sütunu güncelle (göreceli olduğu için builder bunu yapıyor zaten)
                             }
                         }
                     }
@@ -164,13 +156,10 @@ impl Highlight {
     }
 
     fn byte_to_line_col(&self, byte_offset: usize, line_starts: &[usize], source: &str) -> (u32, u32) {
-        // `line_starts` dizisinde, `byte_offset`'ten küçük veya eşit olan son elemanı bul.
-        // Bu bize satır numarasını verir. `partition_point` bunun için çok verimlidir.
         let line = line_starts.partition_point(|&start| start <= byte_offset) - 1;
 
         let line_start_byte = line_starts[line];
 
-        // Sütun, satırın başından itibaren olan karakter sayısıdır (UTF-16 birimleriyle).
         let col = source[line_start_byte..byte_offset].encode_utf16().count();
 
         (line as u32, col as u32)

@@ -32,7 +32,7 @@ impl Backend {
                 line += 1;
                 character = 0;
             } else if ch != '\r' {
-                character += 1;
+                character += ch.encode_utf16(&mut [0u16; 2]).len() as u32;
             }
         }
 
