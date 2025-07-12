@@ -5,7 +5,9 @@ mod consts;
 use crate::app_state::AppState;
 use crate::backend::Backend;
 use tower_lsp::{LspService, Server};
-use tracing::info;
+
+#[cfg(debug_assertions)]
+use tracing::debug;
 
 #[tokio::main]
 async fn main() {
@@ -20,19 +22,23 @@ async fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    // let stdin = tokio::io::stdin();
-    // let stdout = tokio::io::stdout();
+    #[cfg(debug_assertions)]
+    tcp_connection().await;
 
+    #[cfg(not(debug_assertions))]
+    stdio_connection().await;
+}
+
+#[cfg(debug_assertions)]
+async fn tcp_connection() {
     let addr = "127.0.0.1:9257";
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    info!("LSP sunucusu TCP üzerinden dinliyor: {}", addr);
+    debug!("LSP server listens on TCP server: {}", addr);
 
     loop {
         let (stream, client_addr) = listener.accept().await.unwrap();
-        info!("Yeni istemci bağlandı: {}", client_addr);
-
-        //let app_state_clone = app_state.clone();
+        debug!("New client connected: {}", client_addr);
 
         let (service, socket) = LspService::new(|client| Backend::new(client, AppState::setup()));
 
@@ -40,7 +46,16 @@ async fn main() {
 
         tokio::spawn(async move {
             Server::new(read, write, socket).serve(service).await;
-            info!("İstemci oturumu sonlandı: {}", client_addr);
+            debug!("Client session ended: {}", client_addr);
         });
     }
+}
+
+#[cfg(not(debug_assertions))]
+async fn stdio_connection() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+
+    let (service, socket) = LspService::new(|client| Backend::new(client, AppState::setup()));
+    Server::new(stdin, stdout, socket).serve(service).await;
 }
