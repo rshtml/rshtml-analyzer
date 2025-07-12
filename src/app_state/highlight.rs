@@ -165,12 +165,17 @@ impl Highlight {
         (line as u32, col as u32)
     }
 
+    #[allow(dead_code)]
     pub fn semantic_tokens_difference(&self, old_tokens: &[SemanticToken], new_tokens: &[SemanticToken]) -> Vec<SemanticTokensEdit> {
-        if old_tokens == new_tokens {
+        let common_prefix_len = old_tokens
+            .iter()
+            .zip(new_tokens.iter())
+            .take_while(|(old, new)| old == new)
+            .count();
+
+        if common_prefix_len == old_tokens.len() && common_prefix_len == new_tokens.len() {
             return vec![];
         }
-
-        let common_prefix_len = old_tokens.iter().zip(new_tokens.iter()).take_while(|(old, new)| old == new).count();
 
         let common_suffix_len = old_tokens[common_prefix_len..]
             .iter()
@@ -180,10 +185,9 @@ impl Highlight {
             .count();
 
         let start = common_prefix_len as u32;
-
         let delete_count = (old_tokens.len() - common_prefix_len - common_suffix_len) as u32;
-
         let new_data_slice = &new_tokens[common_prefix_len..(new_tokens.len() - common_suffix_len)];
+
         let data = if new_data_slice.is_empty() {
             None
         } else {

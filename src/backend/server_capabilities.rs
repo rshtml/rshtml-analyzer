@@ -14,7 +14,7 @@ pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities
         work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
         legend,
         range: Some(true),
-        full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
+        full: Some(SemanticTokensFullOptions::Bool(true)), //Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
     }));
 
     semantic_tokens_provider
