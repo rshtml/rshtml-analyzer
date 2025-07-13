@@ -46,4 +46,4 @@ jobs:
         with:
           name: rshtml-analyzer-${{ runner.os }}
           path: |
-            ${{ github.workspace }}/target/release/rshtml-analyzer${{ runner.os == 'windows-latest' && '.exe' || '' }}
+            ${{ github.workspace }}/target/release/rshtml-analyzer${{ runner.os == 'Windows' && '.exe' || '' }}
