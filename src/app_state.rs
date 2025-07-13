@@ -43,8 +43,8 @@ impl AppState {
         let mut highlight_config = HighlightConfiguration::new(
             lang.clone(),
             "rshtml",
-            include_str!("../../tree-sitter-rshtml/queries/highlights.scm"),
-            include_str!("../../tree-sitter-rshtml/queries/injections.scm"),
+            include_str!("../queries/rshtml/highlights.scm"),
+            include_str!("../queries/rshtml/injections.scm"),
             "",
         )
         .unwrap();
@@ -53,8 +53,8 @@ impl AppState {
         let mut highlight_config_rust = HighlightConfiguration::new(
             Language::new(tree_sitter_rust::LANGUAGE),
             "rust",
-            include_str!("../../tree-sitter-rust/queries/highlights.scm"),
-            include_str!("../../tree-sitter-rust/queries/injections.scm"),
+            include_str!("../queries/rust/highlights.scm"),
+            include_str!("../queries/rust/injections.scm"),
             "",
         )
         .unwrap();
