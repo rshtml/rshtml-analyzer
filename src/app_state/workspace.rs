@@ -25,28 +25,28 @@ impl Default for Workspace {
 
 impl Workspace {
     pub fn load(&mut self, root: &Path) -> Result<(), String> {
-        let mut new_workspace = Self::default();
-        new_workspace.root = root.to_path_buf();
+        let mut new_workspace = Self {
+            root: root.to_path_buf(),
+            ..Default::default()
+        };
 
-        let cargo_toml = fs::read_to_string(&root.join("Cargo.toml")).map_err(|e| e.to_string())?;
+        let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).map_err(|e| e.to_string())?;
         let cargo_toml: Value = toml::from_str(&cargo_toml).map_err(|e| e.to_string())?;
 
         let member_paths = cargo_toml
             .get("workspace")
             .and_then(|workspace| workspace.get("members").and_then(|members| members.as_array()))
-            .and_then(|members| {
-                Some(
-                    members
-                        .iter()
-                        .map(|member| root.join(member.to_string().trim_matches('"')))
-                        .collect::<Vec<_>>(),
-                )
+            .map(|members| {
+                members
+                    .iter()
+                    .map(|member| root.join(member.to_string().trim_matches('"')))
+                    .collect::<Vec<_>>()
             });
 
         if let Some(member_paths) = member_paths {
             for member_path in member_paths {
                 debug!("MEMBER PATH: {}", member_path.to_str().unwrap());
-                let cargo_toml = fs::read_to_string(&member_path.join("Cargo.toml")).map_err(|e| e.to_string())?;
+                let cargo_toml = fs::read_to_string(member_path.join("Cargo.toml")).map_err(|e| e.to_string())?;
                 let cargo_toml: Value = toml::from_str(&cargo_toml).map_err(|e| e.to_string())?;
                 let views = self.load_manifest(&cargo_toml)?;
                 let member = Member {
@@ -64,7 +64,7 @@ impl Workspace {
                 views_path: root.join(views.0),
                 views_layout: views.1.to_string(),
             };
-            
+
             debug!("MEMBER PATH: {}", member.path.to_string_lossy().to_string());
 
             new_workspace.members.push(member);
@@ -90,13 +90,7 @@ impl Workspace {
     }
 
     pub fn get_member_by_view(&self, view_path: &Path) -> Option<&Member> {
-        for member in &self.members {
-            if view_path.starts_with(&member.path) {
-                return Some(member);
-            }
-        }
-
-        None
+        self.members.iter().find(|&member| view_path.starts_with(&member.path))
     }
 
     pub fn get_layout_path_by_view(&self, view_path: &Path) -> Option<PathBuf> {

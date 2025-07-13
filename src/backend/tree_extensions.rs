@@ -41,7 +41,7 @@ impl TreeExtensions for tree_sitter::Tree {
     where
         F: FnMut(&QueryMatch) -> Option<T>,
     {
-        let query = Query::new(language, query_str).map_err(|e| format!("Failed to create query: {}", e))?;
+        let query = Query::new(language, query_str).map_err(|e| format!("Failed to create query: {e}"))?;
         let mut query_cursor = QueryCursor::new();
         let source_bytes = source.as_bytes();
 
@@ -60,7 +60,7 @@ impl TreeExtensions for tree_sitter::Tree {
 
     fn find_includes(&self, language: &Language, source: &str) -> Vec<String> {
         let query_str = "(include_directive path: (string_line) @include_path)";
-        self.find(language, query_str, &source, |x| {
+        self.find(language, query_str, source, |x| {
             let include_path = x
                 .captures
                 .first()?
@@ -80,7 +80,7 @@ impl TreeExtensions for tree_sitter::Tree {
 
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)> {
         let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (rust_identifier) @use_alias)?)";
-        self.find(language, query_str, &source, |x| {
+        self.find(language, query_str, source, |x| {
             let mut captures = x.captures.iter();
             let use_path = captures
                 .next()?
@@ -106,30 +106,27 @@ impl TreeExtensions for tree_sitter::Tree {
 
     fn find_extends(&self, language: &Language, source: &str) -> Option<Option<String>> {
         let query_str = "(extends_directive) @directive";
-        let extends = self
-            .find(language, query_str, &source, |x| {
-                let capture = Some(x.captures.first().and_then(|x| {
-                    Some(
-                        x.node
-                            .child_by_field_name("path")?
-                            .utf8_text(source.as_bytes())
-                            .ok()?
-                            .trim_matches(Self::STRING_TRIMS)
-                            .to_string(),
-                    )
-                }));
+        self.find(language, query_str, source, |x| {
+            let capture = Some(x.captures.first().and_then(|x| {
+                Some(
+                    x.node
+                        .child_by_field_name("path")?
+                        .utf8_text(source.as_bytes())
+                        .ok()?
+                        .trim_matches(Self::STRING_TRIMS)
+                        .to_string(),
+                )
+            }));
 
-                Some(capture)
-            })
-            .ok()?
-            .pop()?;
-
-        extends
+            Some(capture)
+        })
+        .ok()?
+        .pop()?
     }
 
     fn find_sections(&self, language: &Language, source: &str) -> Vec<String> {
         let query_str = "[(section_directive name: (string_line) @name) (section_block name: (rust_identifier) @name)]";
-        self.find(language, query_str, &source, |x| {
+        self.find(language, query_str, source, |x| {
             let section_name = x
                 .captures
                 .first()?
@@ -149,7 +146,7 @@ impl TreeExtensions for tree_sitter::Tree {
 
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic> {
         let query_str = "[(ERROR) @error (MISSING) @missing]";
-        self.find(language, query_str, &source, |x| {
+        self.find(language, query_str, source, |x| {
             let node = x.captures.first()?.node;
 
             let range = if node.is_missing() {

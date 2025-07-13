@@ -6,9 +6,9 @@ use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
     DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, MessageType, SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams,
-    SemanticTokensFullDeltaResult, SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    InitializedParams, MessageType, SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
+    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -28,7 +28,7 @@ impl LanguageServer for Backend {
         if let Some(path) = workspace_root_path {
             debug!("Workspace root path: {:?}", path);
             self.client
-                .log_message(MessageType::INFO, format!("Workspace root path: {:?}", path))
+                .log_message(MessageType::INFO, format!("Workspace root path: {path:?}"))
                 .await;
 
             let mut workspace = self.state.workspace.write().unwrap();
@@ -161,9 +161,7 @@ impl LanguageServer for Backend {
                 view.update_use_directive_completion_items();
                 view.section_names = section_names;
 
-                let errors = view.tree.find_error(&self.state.language, &view.source);
-
-                errors
+                view.tree.find_error(&self.state.language, &view.source)
             } else {
                 error!("Error while parsing tree");
                 return;
@@ -309,7 +307,7 @@ impl LanguageServer for Backend {
                 completion_items.extend(self.state.completion_items.clone());
             }
 
-            if Some('@') == trigger_char || None == trigger_char {
+            if Some('@') == trigger_char || trigger_char.is_none() {
                 for v in views.values() {
                     let is_layout = uri.to_file_path().map(|x| v.layout_path == Some(x)).unwrap_or(false);
                     if is_layout {

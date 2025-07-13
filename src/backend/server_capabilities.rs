@@ -10,14 +10,12 @@ pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities
         token_modifiers: SEMANTIC_TOKEN_MODIFIERS.to_vec(),
     };
 
-    let semantic_tokens_provider = Some(SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+    Some(SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
         work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
         legend,
         range: Some(true),
         full: Some(SemanticTokensFullOptions::Bool(true)), //Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
-    }));
-
-    semantic_tokens_provider
+    }))
 }
 
 pub fn workspace_capabilities() -> Option<WorkspaceServerCapabilities> {

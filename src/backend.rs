@@ -63,8 +63,8 @@ impl Backend {
     fn process_changes(&self, content_changes: Vec<TextDocumentContentChangeEvent>, source: &mut String, tree: &mut Tree) {
         for change in content_changes {
             if let Some(range) = change.range {
-                let start_byte = Self::position_to_byte_offset(&source, range.start);
-                let end_byte = Self::position_to_byte_offset(&source, range.end);
+                let start_byte = Self::position_to_byte_offset(source, range.start);
+                let end_byte = Self::position_to_byte_offset(source, range.end);
 
                 let edit = tree_sitter::InputEdit {
                     start_byte,

@@ -86,11 +86,7 @@ impl AppState {
         highlights.highlight_injects.insert("rust", highlight_config_rust);
         //highlights.highlight_injects.insert("html", highlight_config_html);
 
-        let state = Self::new(parser, highlights, Self::completion_items(), lang);
-
-        //println!("rshtml: {:?}", final_capture_names);
-
-        state
+        Self::new(parser, highlights, Self::completion_items(), lang)
     }
 
     pub fn find_layout(&self, uri: &Url, layout_name: Option<&str>) -> Option<PathBuf> {

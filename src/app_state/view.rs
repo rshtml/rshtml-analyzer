@@ -39,7 +39,7 @@ impl View {
             .filter_map(|(path, name)| {
                 let name_str = name
                     .as_deref()
-                    .or_else(|| path.trim_end_matches(".rs.html").split('/').last())
+                    .or_else(|| path.trim_end_matches(".rs.html").split('/').next_back())
                     .unwrap_or("");
 
                 if name_str.is_empty() { None } else { Some(name_str.to_string()) }
@@ -51,7 +51,7 @@ impl View {
         let tag_item = CompletionItem {
             label: use_name.to_owned(),
             kind: Some(CompletionItemKind::STRUCT),
-            detail: Some(format!("{} component", use_name)),
+            detail: Some(format!("{use_name} component")),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             insert_text: Some(use_name.to_owned() + " ${1:parameters} />"),
             sort_text: Some("01".to_string()),
@@ -61,7 +61,7 @@ impl View {
         let at_item = CompletionItem {
             label: use_name.to_owned(),
             kind: Some(CompletionItemKind::STRUCT),
-            detail: Some(format!("{} component", use_name)),
+            detail: Some(format!("{use_name} component")),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             insert_text: Some(use_name.to_owned() + "(" + " ${1:parameters} ) { ${2:body} }"),
             sort_text: Some("01".to_string()),
@@ -95,9 +95,9 @@ impl View {
 
     pub fn section_completion_item(section_name: &str) -> (char, CompletionItem) {
         let at_item = CompletionItem {
-            label: format!("render({})", section_name),
+            label: format!("render({section_name})"),
             kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some(format!("{} section", section_name)),
+            detail: Some(format!("{section_name} section")),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             insert_text: Some("render(".to_string() + section_name + ")"),
             sort_text: Some("01".to_string()),
