@@ -1033,7 +1033,7 @@ checksum = "c4013970217383f67b18aef68f6fb2e8d409bc5755227092d32efb0422ba24b8"
 [[package]]
 name = "tree-sitter-rshtml"
 version = "0.1.0"
-source = "git+https://github.com/rshtml/tree-sitter-rshtml.git#ea2411f5b75203a1b7e58c6f9070c25a1c138443"
+source = "git+https://github.com/rshtml/tree-sitter-rshtml.git#7c182831766b92a872bff43a404d1872dc85aee1"
 dependencies = [
  "cc",
  "tree-sitter-language",
