@@ -1,16 +1,15 @@
-name: Create and Publish Release
+name: Build and Upload to Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 permissions:
   contents: write
 
 jobs:
   build-and-release:
-    name: Build and Release
+    name: Build and Upload Assets
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -48,7 +47,7 @@ jobs:
         if: runner.os == 'Windows'
         run: Compress-Archive -Path target\${{ matrix.target }}\release\${{ matrix.binary_name }} -DestinationPath ${{ matrix.archive_name }}
 
-      - name: Create Release and Upload Assets
+      - name: Upload Assets to Release
         uses: softprops/action-gh-release@v1
         with:
           files: ${{ matrix.archive_name }}
