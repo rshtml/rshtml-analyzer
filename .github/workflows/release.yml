@@ -1,0 +1,76 @@
+# .github/workflows/release.yml
+
+name: Create and Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create_release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: "Projenin ${{ github.ref_name }} sürümü için otomatik olarak oluşturulmuş yayın."
+          draft: false
+          prerelease: false
+
+    name: Build and Upload
+    needs: create_release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_name: rshtml-analyzer-linux-x64.tar.gz
+            binary_name: rshtml-analyzer
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_name: rshtml-analyzer-macos-x64.tar.gz
+            binary_name: rshtml-analyzer
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_name: rshtml-analyzer-windows-x64.zip
+            binary_name: rshtml-analyzer.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --verbose --release --target ${{ matrix.target }}
+
+      - name: Package for Linux/macOS
+        if: runner.os != 'Windows'
+        run: tar -czvf ${{ matrix.archive_name }} -C target/${{ matrix.target }}/release ${{ matrix.binary_name }}
+
+      - name: Package for Windows
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path target/${{ matrix.target }}/release/${{ matrix.binary_name }} -DestinationPath ${{ matrix.archive_name }}
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ./${{ matrix.archive_name }}
+          asset_name: ${{ matrix.archive_name }}
+          asset_content_type: application/gzip
