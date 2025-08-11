@@ -9,27 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  create_release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Release ${{ github.ref_name }}
-          body: "Auto-generated release for version ${{ github.ref_name }}."
-          draft: false
-          prerelease: false
-
-  build_and_upload:
-    name: Build and Upload Assets
-    needs: create_release
+  build-and-release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
@@ -46,7 +28,6 @@ jobs:
             archive_name: rshtml-analyzer-windows-x64.zip
             binary_name: rshtml-analyzer.exe
 
-    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -67,12 +48,9 @@ jobs:
         if: runner.os == 'Windows'
         run: Compress-Archive -Path target\${{ matrix.target }}\release\${{ matrix.binary_name }} -DestinationPath ${{ matrix.archive_name }}
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ matrix.archive_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./${{ matrix.archive_name }}
-          asset_name: ${{ matrix.archive_name }}
-          asset_content_type: application/octet-stream```
