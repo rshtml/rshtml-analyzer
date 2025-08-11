@@ -23,7 +23,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(parser: Parser, highlight: Highlight, completion_items: Vec<CompletionItem>, language: Language) -> Self {
+    pub fn new(
+        parser: Parser,
+        highlight: Highlight,
+        completion_items: Vec<CompletionItem>,
+        language: Language,
+    ) -> Self {
         Self {
             workspace: RwLock::new(Workspace::default()),
             parser: Mutex::new(parser),
@@ -60,31 +65,47 @@ impl AppState {
         .unwrap();
 
         // Html highlights
-        // let mut highlight_config_html = HighlightConfiguration::new(
-        //     Language::new(tree_sitter_html::LANGUAGE),
-        //     "html",
-        //     include_str!("../../tree-sitter-html/queries/highlights.scm"),
-        //     include_str!("../../tree-sitter-html/queries/injections.scm"),
-        //     "",
-        // )
-        // .unwrap();
+        let mut highlight_config_html = HighlightConfiguration::new(
+            Language::new(tree_sitter_html::LANGUAGE),
+            "html",
+            include_str!("../queries/html/highlights.scm"),
+            include_str!("../queries/html/injections.scm"),
+            "",
+        )
+        .unwrap();
 
-        let mut cn: HashSet<String> = highlight_config.names().iter().map(|s| s.to_string()).collect();
-        let cnr: HashSet<String> = highlight_config_rust.names().iter().map(|s| s.to_string()).collect();
-        //let cnh: HashSet<String> = highlight_config_html.names().iter().map(|s| s.to_string()).collect();
+        let mut cn: HashSet<String> = highlight_config
+            .names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cnr: HashSet<String> = highlight_config_rust
+            .names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cnh: HashSet<String> = highlight_config_html
+            .names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
         cn.extend(cnr);
-        //cn.extend(cnh);
+        cn.extend(cnh);
         let final_capture_names: Vec<String> = cn.into_iter().collect();
 
         highlight_config.configure(final_capture_names.as_ref());
 
         highlight_config_rust.configure(final_capture_names.as_ref());
-        //highlight_config_html.configure(final_capture_names.as_ref());
+        highlight_config_html.configure(final_capture_names.as_ref());
 
         let mut highlights = Highlight::new(highlight_config, final_capture_names.clone());
-        highlights.highlight_injects.insert("rust", highlight_config_rust);
-        //highlights.highlight_injects.insert("html", highlight_config_html);
+        highlights
+            .highlight_injects
+            .insert("rust", highlight_config_rust);
+        highlights
+            .highlight_injects
+            .insert("html", highlight_config_html);
 
         Self::new(parser, highlights, Self::completion_items(), lang)
     }
@@ -130,7 +151,9 @@ impl AppState {
         let match_ = CompletionItem {
             label: "match".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some("match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string()),
+            insert_text: Some(
+                "match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string(),
+            ),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("match statement".to_string()),
             sort_text: Some("03".to_string()),
@@ -160,7 +183,9 @@ impl AppState {
         let use_as_ = CompletionItem {
             label: "use .. as".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string()),
+            insert_text: Some(
+                r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string(),
+            ),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("use .. as directive".to_string()),
             sort_text: Some("06".to_string()),
