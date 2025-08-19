@@ -42,7 +42,11 @@ impl View {
                     .or_else(|| path.trim_end_matches(".rs.html").split('/').next_back())
                     .unwrap_or("");
 
-                if name_str.is_empty() { None } else { Some(name_str.to_string()) }
+                if name_str.is_empty() {
+                    None
+                } else {
+                    Some(name_str.to_string())
+                }
             })
             .collect()
     }
@@ -58,17 +62,7 @@ impl View {
             ..Default::default()
         };
 
-        let at_item = CompletionItem {
-            label: use_name.to_owned(),
-            kind: Some(CompletionItemKind::STRUCT),
-            detail: Some(format!("{use_name} component")),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            insert_text: Some(use_name.to_owned() + "(" + " ${1:parameters} ) { ${2:body} }"),
-            sort_text: Some("01".to_string()),
-            ..Default::default()
-        };
-
-        vec![('<', tag_item), ('@', at_item)]
+        vec![('<', tag_item)]
     }
 
     pub fn create_use_directive_completion_items(&mut self) {
@@ -77,14 +71,18 @@ impl View {
         for use_name in use_names {
             let items = Self::use_directive_completion_item(&use_name);
 
-            self.completion_items.entry(use_name).or_default().extend(items);
+            self.completion_items
+                .entry(use_name)
+                .or_default()
+                .extend(items);
         }
     }
 
     pub fn update_use_directive_completion_items(&mut self) {
         let current_names: HashSet<String> = self.use_directives_names().into_iter().collect();
 
-        self.completion_items.retain(|name, _| current_names.contains(name));
+        self.completion_items
+            .retain(|name, _| current_names.contains(name));
 
         for name in current_names {
             self.completion_items
