@@ -6,14 +6,9 @@
 (close_paren) @punctuation.bracket
 (open_brace) @punctuation.bracket
 (close_brace) @punctuation.bracket
-;(open_bracket) @punctuation.bracket
-;(close_bracket) @punctuation.bracket
 
-;(comma) @punctuation.delimiter
 (fat_arrow) @operator
-(colon) @punctuation.delimiter
 (semicolon) @punctuation.delimiter
-(at_colon) @operator
 (equals) @punctuation.delimiter
 
 (string_line) @string
@@ -43,12 +38,6 @@
 (number) @number
 (bool) @boolean
 
-(component
-  name: (rust_identifier) @type)
-
-(component_parameter
-  name: (rust_identifier) @variable.parameter)
-
 (as_clause
   alias: (rust_identifier) @type)
 
@@ -68,4 +57,4 @@
 
 ;this is for now extra
 (else_clause
-  head: (source_file) @keyword)
+  head: (source_text) @keyword)
