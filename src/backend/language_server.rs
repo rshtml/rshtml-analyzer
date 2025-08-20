@@ -13,7 +13,6 @@ use tower_lsp::lsp_types::{
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
 
-// TODO: use tree-sitter-rust for rust highlights - compile it with ast
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -286,11 +285,9 @@ impl LanguageServer for Backend {
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
             if let Some(tc) = trigger_char {
-                for items in view.completion_items.values() {
-                    for (item_char, item) in items {
-                        if *item_char == tc {
-                            completion_items.push(item.clone());
-                        }
+                for (item_char, item) in view.completion_items.values() {
+                    if *item_char == tc {
+                        completion_items.push(item.clone());
                     }
                 }
 
@@ -298,10 +295,8 @@ impl LanguageServer for Backend {
                     completion_items.extend(self.state.completion_items.clone());
                 }
             } else {
-                for items in view.completion_items.values() {
-                    for (_, item) in items {
-                        completion_items.push(item.clone());
-                    }
+                for (_, item) in view.completion_items.values() {
+                    completion_items.push(item.clone());
                 }
 
                 completion_items.extend(self.state.completion_items.clone());
@@ -316,7 +311,7 @@ impl LanguageServer for Backend {
                             .iter()
                             .filter_map(|(name, value)| {
                                 if name.starts_with("section_") {
-                                    value.first().map(|x| x.1.clone())
+                                    Some(value.1.clone())
                                 } else {
                                     None
                                 }

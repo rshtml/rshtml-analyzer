@@ -1,1 +1,0 @@
-completion items must not be hasmap array, must be directily hashmap<string,completionitem>

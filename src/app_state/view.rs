@@ -10,7 +10,7 @@ pub struct View {
     pub include_paths: Vec<String>,
     pub use_directives: Vec<(String, Option<String>)>,
     pub section_names: Vec<String>,
-    pub completion_items: HashMap<String, Vec<(char, CompletionItem)>>,
+    pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
     pub semantic_tokens_version: u64,
 
@@ -51,7 +51,7 @@ impl View {
             .collect()
     }
 
-    fn use_directive_completion_item(use_name: &str) -> Vec<(char, CompletionItem)> {
+    fn use_directive_completion_item(use_name: &str) -> (char, CompletionItem) {
         let tag_item = CompletionItem {
             label: use_name.to_owned(),
             kind: Some(CompletionItemKind::STRUCT),
@@ -62,19 +62,16 @@ impl View {
             ..Default::default()
         };
 
-        vec![('<', tag_item)]
+        ('<', tag_item)
     }
 
     pub fn create_use_directive_completion_items(&mut self) {
         let use_names = self.use_directives_names();
 
         for use_name in use_names {
-            let items = Self::use_directive_completion_item(&use_name);
+            let item = Self::use_directive_completion_item(&use_name);
 
-            self.completion_items
-                .entry(use_name)
-                .or_default()
-                .extend(items);
+            self.completion_items.insert(use_name, item);
         }
     }
 
@@ -110,9 +107,7 @@ impl View {
         for section_name in section_names {
             let item = Self::section_completion_item(section_name);
             self.completion_items
-                .entry(format!("section_{}", section_name.to_owned()))
-                .or_default()
-                .extend(vec![item]);
+                .insert(format!("section_{}", section_name.to_owned()), item);
         }
     }
 }
