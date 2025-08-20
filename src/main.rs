@@ -5,12 +5,19 @@ mod consts;
 use crate::app_state::AppState;
 use crate::backend::Backend;
 use tower_lsp::{LspService, Server};
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(version)]
+struct Cli{}
 
 #[cfg(debug_assertions)]
 use tracing::debug;
 
 #[tokio::main]
 async fn main() {
+    Cli::parse();
+
     let filter_level = if cfg!(debug_assertions) {
         tracing::Level::DEBUG
     } else {
