@@ -9,7 +9,10 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[command(version)]
-struct Cli{}
+struct Cli{
+    #[arg(long)]
+    stdio: bool,
+}
 
 #[cfg(debug_assertions)]
 use tracing::debug;
