@@ -42,6 +42,11 @@ jobs:
             target: x86_64-pc-windows-msvc
             archive_name: rshtml-analyzer-windows-x64.tar.gz
             binary_name: rshtml-analyzer.exe
+          # Windows arm64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            archive_name: rshtml-analyzer-windows-arm64.tar.gz
+            binary_name: rshtml-analyzer.exe
 
     steps:
       - name: Checkout repository
