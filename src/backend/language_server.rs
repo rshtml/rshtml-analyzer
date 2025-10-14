@@ -60,7 +60,7 @@ impl LanguageServer for Backend {
             },
             server_info: Some(ServerInfo {
                 name: "rshtml-analyzer".to_string(),
-                version: Some("0.1.0".to_string()),
+                version: Some(env!("CARGO_PKG_VERSION").to_string()),
             }),
         })
     }
