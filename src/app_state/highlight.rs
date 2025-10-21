@@ -146,7 +146,10 @@ impl Highlight {
         let base_name = highlight_name.split('.').next().unwrap_or(highlight_name);
 
         let lsp_type_name = match base_name {
-            "keyword" => SemanticTokenType::KEYWORD,
+            "keyword" => match *highlight_name {
+                "keyword.operator" => SemanticTokenType::MACRO,
+                _ => SemanticTokenType::KEYWORD,
+            },
             "comment" => SemanticTokenType::COMMENT,
             "string" => SemanticTokenType::STRING,
             "number" => SemanticTokenType::NUMBER,
