@@ -18,7 +18,8 @@ pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities
             },
             legend,
             range: Some(true),
-            full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }), // Some(SemanticTokensFullOptions::Bool(true)),
+            full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
+            // full: Some(SemanticTokensFullOptions::Bool(true)),
         },
     ))
 }

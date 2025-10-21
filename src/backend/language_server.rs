@@ -236,7 +236,7 @@ impl LanguageServer for Backend {
 
             let tokens_diff = highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
 
-            debug!("Semantic Tokens Delta: {:?}", tokens_diff.len());
+            debug!("Semantic Tokens Delta: {:?} {:?}", tokens_diff.len(), tokens_diff);
 
             view.semantic_tokens_version += 1;
             view.semantic_tokens = SemanticTokens {
