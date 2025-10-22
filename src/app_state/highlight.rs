@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
-use tower_lsp::lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensEdit};
+use tower_lsp::lsp_types::{
+    SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensEdit,
+};
 use tracing::error;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -46,12 +48,19 @@ impl Highlight {
             .collect()
     }
 
-    pub fn highlight(&self, source: &str, range: Option<Range<usize>>) -> Result<Vec<SemanticToken>, Error> {
+    pub fn highlight(
+        &self,
+        source: &str,
+        range: Option<Range<usize>>,
+    ) -> Result<Vec<SemanticToken>, Error> {
         if let Ok(mut highlighter) = self.highlighter.lock() {
             let highlight_events = highlighter
-                .highlight(&self.highlight_config, source.as_bytes(), None, |lang_name| {
-                    self.highlight_injects.get(lang_name)
-                })
+                .highlight(
+                    &self.highlight_config,
+                    source.as_bytes(),
+                    None,
+                    |lang_name| self.highlight_injects.get(lang_name),
+                )
                 .map_err(|e| {
                     error!("Error during highlighting: {}", e);
                     Error::new(ErrorCode::InternalError)
@@ -73,7 +82,9 @@ impl Highlight {
         let mut builder = SemanticTokensBuilder::new();
         let mut highlight_stack: Vec<tree_sitter_highlight::Highlight> = Vec::new();
 
-        let line_starts: Vec<usize> = std::iter::once(0).chain(source.match_indices('\n').map(|(i, _)| i + 1)).collect();
+        let line_starts: Vec<usize> = std::iter::once(0)
+            .chain(source.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
 
         for highlight_event in highlight_events {
             if let Ok(highlight_event) = highlight_event {
@@ -91,7 +102,8 @@ impl Highlight {
                             let token_modifiers = 0;
 
                             let text_span = &source[start..end];
-                            let (mut current_line, mut current_col) = self.byte_to_line_col(start, &line_starts, source);
+                            let (mut current_line, mut current_col) =
+                                self.byte_to_line_col(start, &line_starts, source);
 
                             for (i, line_content) in text_span.lines().enumerate() {
                                 if i > 0 {
@@ -104,7 +116,13 @@ impl Highlight {
                                 }
 
                                 let length = line_content.encode_utf16().count() as u32;
-                                builder.push_token(current_line, current_col, length, token_type, token_modifiers);
+                                builder.push_token(
+                                    current_line,
+                                    current_col,
+                                    length,
+                                    token_type,
+                                    token_modifiers,
+                                );
                             }
                         }
                     }
@@ -128,13 +146,20 @@ impl Highlight {
         let base_name = highlight_name.split('.').next().unwrap_or(highlight_name);
 
         let lsp_type_name = match base_name {
-            "keyword" => SemanticTokenType::KEYWORD,
+            "keyword" => match *highlight_name {
+                "keyword.operator" => SemanticTokenType::MACRO,
+                _ => SemanticTokenType::KEYWORD,
+            },
             "comment" => SemanticTokenType::COMMENT,
             "string" => SemanticTokenType::STRING,
             "number" => SemanticTokenType::NUMBER,
             "operator" => SemanticTokenType::OPERATOR,
             "property" => SemanticTokenType::PROPERTY,
-            "type" | "class" | "struct" | "enum" | "interface" => SemanticTokenType::TYPE,
+            "type" => SemanticTokenType::TYPE,
+            "class" => SemanticTokenType::CLASS,
+            "struct" => SemanticTokenType::STRUCT,
+            "enum" => SemanticTokenType::ENUM,
+            "interface" => SemanticTokenType::INTERFACE,
             "constructor" => SemanticTokenType::METHOD,
             "function" => match *highlight_name {
                 "function.method" => SemanticTokenType::METHOD,
@@ -145,17 +170,27 @@ impl Highlight {
                 "variable.parameter" => SemanticTokenType::PARAMETER,
                 _ => SemanticTokenType::VARIABLE,
             },
-            "constant" | "boolean" => SemanticTokenType::VARIABLE,
-            "attribute" | "tag" => SemanticTokenType::DECORATOR,
+            "constant" => SemanticTokenType::VARIABLE,
+            "boolean" => SemanticTokenType::KEYWORD,
+            "attribute" => SemanticTokenType::PROPERTY,
+            "tag" => SemanticTokenType::STRUCT,
             "label" => SemanticTokenType::NAMESPACE,
             "punctuation" => SemanticTokenType::OPERATOR,
             _ => SemanticTokenType::VARIABLE,
         };
 
-        self.token_type_map.get(&lsp_type_name).copied().unwrap_or(1)
+        self.token_type_map
+            .get(&lsp_type_name)
+            .copied()
+            .unwrap_or(1)
     }
 
-    fn byte_to_line_col(&self, byte_offset: usize, line_starts: &[usize], source: &str) -> (u32, u32) {
+    fn byte_to_line_col(
+        &self,
+        byte_offset: usize,
+        line_starts: &[usize],
+        source: &str,
+    ) -> (u32, u32) {
         let line = line_starts.partition_point(|&start| start <= byte_offset) - 1;
 
         let line_start_byte = line_starts[line];
@@ -166,7 +201,13 @@ impl Highlight {
     }
 
     #[allow(dead_code)]
-    pub fn semantic_tokens_difference(&self, old_tokens: &[SemanticToken], new_tokens: &[SemanticToken]) -> Vec<SemanticTokensEdit> {
+    pub fn semantic_tokens_difference(
+        &self,
+        old_tokens: &[SemanticToken],
+        new_tokens: &[SemanticToken],
+    ) -> Vec<SemanticTokensEdit> {
+        const TOKEN_LEN: usize = 5;
+
         let common_prefix_len = old_tokens
             .iter()
             .zip(new_tokens.iter())
@@ -184,8 +225,9 @@ impl Highlight {
             .take_while(|(old, new)| old == new)
             .count();
 
-        let start = common_prefix_len as u32;
-        let delete_count = (old_tokens.len() - common_prefix_len - common_suffix_len) as u32;
+        let start = (common_prefix_len * TOKEN_LEN) as u32;
+        let delete_count =
+            ((old_tokens.len() - common_prefix_len - common_suffix_len) * TOKEN_LEN) as u32;
         let new_data_slice = &new_tokens[common_prefix_len..(new_tokens.len() - common_suffix_len)];
 
         let data = if new_data_slice.is_empty() {
@@ -194,6 +236,10 @@ impl Highlight {
             Some(new_data_slice.to_vec())
         };
 
-        vec![SemanticTokensEdit { start, delete_count, data }]
+        vec![SemanticTokensEdit {
+            start,
+            delete_count,
+            data,
+        }]
     }
 }
