@@ -90,10 +90,10 @@ impl Highlight {
             if let Ok(highlight_event) = highlight_event {
                 match highlight_event {
                     HighlightEvent::Source { start, end } => {
-                        if let Some(ref r) = range {
-                            if start >= r.end || end <= r.start {
-                                continue;
-                            }
+                        if let Some(ref r) = range
+                            && (start >= r.end || end <= r.start)
+                        {
+                            continue;
                         }
 
                         if let Some(highlight_id) = highlight_stack.last() {

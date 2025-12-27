@@ -6,7 +6,6 @@ pub struct View {
     pub source: String,
     pub tree: Tree,
     pub use_directives: Vec<(String, Option<String>, Vec<String>)>,
-    pub fns: Vec<(String, Vec<String>)>,
     pub template_params: Vec<String>,
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
@@ -21,7 +20,6 @@ impl View {
             source,
             tree,
             use_directives: Vec::new(),
-            fns: Vec::new(),
             template_params: Vec::new(),
             completion_items: HashMap::new(),
             semantic_tokens: SemanticTokens::default(),
@@ -127,38 +125,6 @@ impl View {
                 .or_insert_with_key(|use_name| {
                     Self::use_directive_completion_item(use_name, &params)
                 });
-        }
-    }
-
-    pub fn fn_completion_item(fn_name: &str, params: &[String]) -> (char, CompletionItem) {
-        let insert_params = params
-            .iter()
-            .enumerate()
-            .map(|(i, name)| format!("${{{}:{}}}", i + 1, name))
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let label_params = params.join(", ");
-
-        let at_item = CompletionItem {
-            label: format!("{fn_name}({label_params})"),
-            kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some(format!("{fn_name} function")),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            insert_text: Some(format!("{fn_name}({insert_params})")),
-            sort_text: Some("01".to_string()),
-            ..Default::default()
-        };
-
-        ('@', at_item)
-    }
-
-    pub fn create_fn_completion_items(&mut self) {
-        let fns = &self.fns;
-        for (fn_name, params) in fns {
-            let item = Self::fn_completion_item(fn_name, params);
-            self.completion_items
-                .insert(format!("fn_{}", fn_name.to_owned()), item);
         }
     }
 }

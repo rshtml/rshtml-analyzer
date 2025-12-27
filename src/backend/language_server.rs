@@ -104,7 +104,13 @@ impl LanguageServer for Backend {
         let views_path = {
             let file_path = &params.text_document.uri.to_file_path().unwrap_or_default();
             let workspace = self.state.workspace.read().await;
-            let member = workspace.get_member_by_view(&file_path).unwrap();
+
+            let member = if let Some(member) = workspace.get_member_by_view(file_path) {
+                member
+            } else {
+                error!("view {file_path:?} not found");
+                return;
+            };
 
             member.views_path.clone()
         };
@@ -128,7 +134,6 @@ impl LanguageServer for Backend {
             view.use_directives = use_directives_with_params;
             view.create_use_directive_completion_items();
             view.template_params = template_params;
-            view.create_fn_completion_items();
 
             let mut views = self.state.views.write().await;
 
@@ -196,7 +201,12 @@ impl LanguageServer for Backend {
         let views_path = {
             let file_path = &params.text_document.uri.to_file_path().unwrap_or_default();
             let workspace = self.state.workspace.read().await;
-            let member = workspace.get_member_by_view(&file_path).unwrap();
+            let member = if let Some(member) = workspace.get_member_by_view(file_path) {
+                member
+            } else {
+                error!("view {file_path:?} not found");
+                return;
+            };
 
             member.views_path.clone()
         };
