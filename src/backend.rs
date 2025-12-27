@@ -1,7 +1,7 @@
 mod language_server;
 pub mod semantic_tokens_builder;
 mod server_capabilities;
-mod tree_extensions;
+pub mod tree_extensions;
 
 use crate::app_state::AppState;
 use tower_lsp::Client;
@@ -15,7 +15,10 @@ pub struct Backend {
 
 impl Backend {
     pub fn new(client: Client, app_state: AppState) -> Self {
-        Self { client, state: app_state }
+        Self {
+            client,
+            state: app_state,
+        }
     }
 
     fn position_to_byte_offset(text: &str, position: Position) -> usize {
@@ -60,7 +63,12 @@ impl Backend {
         new_pos
     }
 
-    fn process_changes(&self, content_changes: Vec<TextDocumentContentChangeEvent>, source: &mut String, tree: &mut Tree) {
+    fn process_changes(
+        &self,
+        content_changes: Vec<TextDocumentContentChangeEvent>,
+        source: &mut String,
+        tree: &mut Tree,
+    ) {
         for change in content_changes {
             if let Some(range) = change.range {
                 let start_byte = Self::position_to_byte_offset(source, range.start);

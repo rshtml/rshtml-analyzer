@@ -1,15 +1,13 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens};
 use tree_sitter::Tree;
 
 pub struct View {
     pub source: String,
     pub tree: Tree,
-    pub layout_path: Option<PathBuf>,
-    pub include_paths: Vec<String>,
-    pub use_directives: Vec<(String, Option<String>)>,
-    pub section_names: Vec<String>,
+    pub use_directives: Vec<(String, Option<String>, Vec<String>)>,
+    pub fns: Vec<(String, Vec<String>)>,
+    pub template_params: Vec<String>,
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
     pub semantic_tokens_version: u64,
@@ -22,10 +20,9 @@ impl View {
         Self {
             source,
             tree,
-            layout_path: None,
-            include_paths: Vec::new(),
             use_directives: Vec::new(),
-            section_names: Vec::new(),
+            fns: Vec::new(),
+            template_params: Vec::new(),
             completion_items: HashMap::new(),
             semantic_tokens: SemanticTokens::default(),
             semantic_tokens_version: 0,
@@ -33,10 +30,10 @@ impl View {
         }
     }
 
-    pub fn use_directives_names(&self) -> Vec<String> {
+    pub fn use_directives_names_and_params(&self) -> Vec<(String, Vec<String>)> {
         self.use_directives
             .iter()
-            .filter_map(|(path, name)| {
+            .filter_map(|(path, name, params)| {
                 let name_str = name
                     .as_deref()
                     .or_else(|| path.trim_end_matches(".rs.html").split('/').next_back())
@@ -45,19 +42,61 @@ impl View {
                 if name_str.is_empty() {
                     None
                 } else {
-                    Some(name_str.to_string())
+                    Some((name_str.to_string(), params.to_owned()))
                 }
             })
             .collect()
     }
 
-    fn use_directive_completion_item(use_name: &str) -> (char, CompletionItem) {
+    pub fn sync_use_directives(
+        &mut self,
+        use_directives: Vec<(String, Option<String>)>,
+    ) -> Vec<(usize, String)> {
+        if self.use_directives.len() == use_directives.len()
+            && self
+                .use_directives
+                .iter()
+                .zip(&use_directives)
+                .all(|((op, oa, _), (np, na))| op == np && oa == na)
+        {
+            return Vec::new();
+        }
+
+        self.use_directives
+            .retain(|(old_path, _, _)| use_directives.iter().any(|(new_p, _)| new_p == old_path));
+
+        let mut new_use_ids = Vec::new();
+
+        for (path, alias) in use_directives {
+            if let Some(existing) = self.use_directives.iter_mut().find(|(p, _, _)| *p == path) {
+                existing.1 = alias;
+            } else {
+                self.use_directives.push((path.clone(), alias, Vec::new()));
+                let id = self.use_directives.len() - 1;
+                new_use_ids.push((id, path));
+            }
+        }
+
+        new_use_ids
+    }
+
+    fn use_directive_completion_item(
+        use_name: &str,
+        use_params: &[String],
+    ) -> (char, CompletionItem) {
+        let snippet_params = use_params
+            .iter()
+            .enumerate()
+            .map(|(i, name)| format!("{}=\"${{{}:{}}}\"", name, i + 1, name))
+            .collect::<Vec<String>>()
+            .join(" ");
+
         let tag_item = CompletionItem {
             label: use_name.to_owned(),
             kind: Some(CompletionItemKind::STRUCT),
             detail: Some(format!("{use_name} component")),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
-            insert_text: Some(use_name.to_owned() + " ${1:parameters} />"),
+            insert_text: Some(format!("{use_name} {snippet_params}/>")),
             sort_text: Some("01".to_string()),
             ..Default::default()
         };
@@ -66,35 +105,47 @@ impl View {
     }
 
     pub fn create_use_directive_completion_items(&mut self) {
-        let use_names = self.use_directives_names();
+        let use_names_and_params = self.use_directives_names_and_params();
 
-        for use_name in use_names {
-            let item = Self::use_directive_completion_item(&use_name);
+        for (use_name, use_params) in use_names_and_params {
+            let item = Self::use_directive_completion_item(&use_name, &use_params);
 
             self.completion_items.insert(use_name, item);
         }
     }
 
     pub fn update_use_directive_completion_items(&mut self) {
-        let current_names: HashSet<String> = self.use_directives_names().into_iter().collect();
+        let current_names_and_params: HashSet<(String, Vec<String>)> =
+            self.use_directives_names_and_params().into_iter().collect();
 
         self.completion_items
-            .retain(|name, _| current_names.contains(name));
+            .retain(|name, _| current_names_and_params.iter().any(|(n, _)| n == name));
 
-        for name in current_names {
+        for (name, params) in current_names_and_params {
             self.completion_items
                 .entry(name)
-                .or_insert_with_key(|use_name| Self::use_directive_completion_item(use_name));
+                .or_insert_with_key(|use_name| {
+                    Self::use_directive_completion_item(use_name, &params)
+                });
         }
     }
 
-    pub fn section_completion_item(section_name: &str) -> (char, CompletionItem) {
+    pub fn fn_completion_item(fn_name: &str, params: &[String]) -> (char, CompletionItem) {
+        let insert_params = params
+            .iter()
+            .enumerate()
+            .map(|(i, name)| format!("${{{}:{}}}", i + 1, name))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let label_params = params.join(", ");
+
         let at_item = CompletionItem {
-            label: format!("render({section_name})"),
+            label: format!("{fn_name}({label_params})"),
             kind: Some(CompletionItemKind::FUNCTION),
-            detail: Some(format!("{section_name} section")),
+            detail: Some(format!("{fn_name} function")),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
-            insert_text: Some("render(".to_string() + section_name + ")"),
+            insert_text: Some(format!("{fn_name}({insert_params})")),
             sort_text: Some("01".to_string()),
             ..Default::default()
         };
@@ -102,12 +153,12 @@ impl View {
         ('@', at_item)
     }
 
-    pub fn create_section_completion_items(&mut self) {
-        let section_names = &self.section_names;
-        for section_name in section_names {
-            let item = Self::section_completion_item(section_name);
+    pub fn create_fn_completion_items(&mut self) {
+        let fns = &self.fns;
+        for (fn_name, params) in fns {
+            let item = Self::fn_completion_item(fn_name, params);
             self.completion_items
-                .insert(format!("section_{}", section_name.to_owned()), item);
+                .insert(format!("fn_{}", fn_name.to_owned()), item);
         }
     }
 }

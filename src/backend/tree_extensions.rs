@@ -6,17 +6,19 @@ use tree_sitter::{Language, Query, QueryCursor, QueryMatch, Range, StreamingIter
 pub trait TreeExtensions {
     const STRING_TRIMS: &'_ [char] = &[' ', '\'', '"'];
 
-    fn find<T, F>(&self, language: &Language, query_str: &str, source: &str, processor: F) -> Result<Vec<T>, String>
+    fn find<T, F>(
+        &self,
+        language: &Language,
+        query_str: &str,
+        source: &str,
+        processor: F,
+    ) -> Result<Vec<T>, String>
     where
         F: FnMut(&QueryMatch) -> Option<T>;
 
-    fn find_includes(&self, language: &Language, source: &str) -> Vec<String>;
-
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)>;
 
-    fn find_extends(&self, language: &Language, source: &str) -> Option<Option<String>>;
-
-    fn find_sections(&self, language: &Language, source: &str) -> Vec<String>;
+    fn find_template_params(&self, language: &Language, source: &str) -> Vec<String>;
 
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic>;
 
@@ -37,11 +39,18 @@ pub trait TreeExtensions {
 }
 
 impl TreeExtensions for tree_sitter::Tree {
-    fn find<T, F>(&self, language: &Language, query_str: &str, source: &str, mut processor: F) -> Result<Vec<T>, String>
+    fn find<T, F>(
+        &self,
+        language: &Language,
+        query_str: &str,
+        source: &str,
+        mut processor: F,
+    ) -> Result<Vec<T>, String>
     where
         F: FnMut(&QueryMatch) -> Option<T>,
     {
-        let query = Query::new(language, query_str).map_err(|e| format!("Failed to create query: {e}"))?;
+        let query =
+            Query::new(language, query_str).map_err(|e| format!("Failed to create query: {e}"))?;
         let mut query_cursor = QueryCursor::new();
         let source_bytes = source.as_bytes();
 
@@ -58,28 +67,8 @@ impl TreeExtensions for tree_sitter::Tree {
         Ok(results)
     }
 
-    fn find_includes(&self, language: &Language, source: &str) -> Vec<String> {
-        let query_str = "(include_directive path: (string_line) @include_path)";
-        self.find(language, query_str, source, |x| {
-            let include_path = x
-                .captures
-                .first()?
-                .node
-                .utf8_text(source.as_bytes())
-                .ok()?
-                .trim_matches(Self::STRING_TRIMS)
-                .to_string();
-
-            Some(include_path)
-        })
-        .unwrap_or_else(|x| {
-            error!("Error during include path query: {}", x);
-            vec![]
-        })
-    }
-
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)> {
-        let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (rust_identifier) @use_alias)?)";
+        let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (component_tag_identifier) @use_alias)?)";
         self.find(language, query_str, source, |x| {
             let mut captures = x.captures.iter();
             let use_path = captures
@@ -104,42 +93,24 @@ impl TreeExtensions for tree_sitter::Tree {
         })
     }
 
-    fn find_extends(&self, language: &Language, source: &str) -> Option<Option<String>> {
-        let query_str = "(extends_directive) @directive";
+    fn find_template_params(&self, language: &Language, source: &str) -> Vec<String> {
+        let query_str = "[(template_params (param (param_name) @param_name))]";
         self.find(language, query_str, source, |x| {
-            let capture = Some(x.captures.first().and_then(|x| {
-                Some(
-                    x.node
-                        .child_by_field_name("path")?
+            let mut param_names = Vec::with_capacity(x.captures.len());
+            for c in x.captures {
+                param_names.push(
+                    c.node
                         .utf8_text(source.as_bytes())
-                        .ok()?
-                        .trim_matches(Self::STRING_TRIMS)
-                        .to_string(),
-                )
-            }));
-
-            Some(capture)
+                        .map(|s| s.trim_matches(Self::STRING_TRIMS).to_string())
+                        .ok()?,
+                );
+            }
+            Some(param_names)
         })
-        .ok()?
-        .pop()?
-    }
-
-    fn find_sections(&self, language: &Language, source: &str) -> Vec<String> {
-        let query_str = "[(section_directive name: (string_line) @name) (section_block name: (rust_identifier) @name)]";
-        self.find(language, query_str, source, |x| {
-            let section_name = x
-                .captures
-                .first()?
-                .node
-                .utf8_text(source.as_bytes())
-                .ok()?
-                .trim_matches(Self::STRING_TRIMS)
-                .to_string();
-
-            Some(section_name)
-        })
-        .unwrap_or_else(|x| {
-            error!("Error during include path query: {}", x);
+        .ok()
+        .map(|results| results.into_iter().flatten().collect::<Vec<String>>())
+        .unwrap_or_else(|| {
+            error!("Error during template params query");
             vec![]
         })
     }
@@ -161,7 +132,10 @@ impl TreeExtensions for tree_sitter::Tree {
             let message = if node.is_missing() {
                 format!("Missing `{}`", node.kind().replace('_', " "))
             } else {
-                format!("Syntax error in `{}`", node.utf8_text(source.as_bytes()).ok()?)
+                format!(
+                    "Syntax error in `{}`",
+                    node.utf8_text(source.as_bytes()).ok()?
+                )
             };
 
             let diagnostic = Diagnostic {

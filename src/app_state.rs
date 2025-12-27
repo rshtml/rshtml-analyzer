@@ -5,11 +5,12 @@ pub mod workspace;
 use crate::app_state::highlight::Highlight;
 use crate::app_state::view::View;
 use crate::app_state::workspace::Workspace;
+use crate::backend::tree_extensions::TreeExtensions;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Url};
-use tracing::debug;
 use tree_sitter::{Language, Parser};
 use tree_sitter_highlight::HighlightConfiguration;
 
@@ -110,21 +111,24 @@ impl AppState {
         Self::new(parser, highlights, Self::completion_items(), lang)
     }
 
-    pub fn find_layout(&self, uri: &Url, layout_name: Option<&str>) -> Option<PathBuf> {
-        let file_path = uri.to_file_path().ok()?;
-
-        if let Ok(workspace) = self.workspace.read() {
-            layout_name
-                .and_then(|layout_name| {
-                    let member = workspace.get_member_by_view(&file_path)?;
-                    let layout_path = member.views_path.join(layout_name);
-                    Some(layout_path)
-                })
-                .or_else(|| workspace.get_layout_path_by_view(&file_path))
-        } else {
-            debug!("workspace is not initialized or locked");
-            None
+    pub async fn find_use_params(&self, use_full_path: &Path) -> Option<Vec<String>> {
+        {
+            let use_uri_str = Url::from_file_path(&use_full_path).ok()?.to_string();
+            let views = self.views.read().await;
+            if let Some(view) = views.get(&use_uri_str) {
+                return Some(view.template_params.clone());
+            }
         }
+
+        let source_bytes = tokio::fs::read(&use_full_path).await.ok()?;
+        let source = str::from_utf8(&source_bytes).ok()?;
+
+        let mut parser = self.parser.lock().await;
+        if let Some(tree) = parser.parse(&source_bytes, None) {
+            return Some(tree.find_template_params(&self.language, &source));
+        }
+
+        None
     }
 
     fn completion_items() -> Vec<CompletionItem> {
@@ -170,16 +174,6 @@ impl AppState {
             ..Default::default()
         };
 
-        let include_ = CompletionItem {
-            label: "include".to_string(),
-            kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(r#"include("${1:path/to/other.rs.html}")"#.to_string()),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            detail: Some("include directive".to_string()),
-            sort_text: Some("05".to_string()),
-            ..Default::default()
-        };
-
         let use_as_ = CompletionItem {
             label: "use .. as".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
@@ -199,26 +193,6 @@ impl AppState {
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("use directive".to_string()),
             sort_text: Some("07".to_string()),
-            ..Default::default()
-        };
-
-        let section_ = CompletionItem {
-            label: "section".to_string(),
-            kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(r#"section("${1:name}", ${2:"value"})"#.to_string()),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
-            detail: Some(r#"section directive"#.to_string()),
-            sort_text: Some("08".to_string()),
-            ..Default::default()
-        };
-
-        let section_body_ = CompletionItem {
-            label: "section_body".to_string(),
-            kind: Some(CompletionItemKind::KEYWORD),
-            insert_text: Some("section_body()".to_string()),
-            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-            detail: Some("section body directive".to_string()),
-            sort_text: Some("09".to_string()),
             ..Default::default()
         };
 
@@ -252,6 +226,16 @@ impl AppState {
             ..Default::default()
         };
 
+        let fn_ = CompletionItem {
+            label: "fn".to_string(),
+            kind: Some(CompletionItemKind::SNIPPET),
+            insert_text: Some("fn ${1:name}(${2:name}: ${3:value}) {\n\t$0\n}".to_string()),
+            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            detail: Some(r#"section directive"#.to_string()),
+            sort_text: Some("08".to_string()),
+            ..Default::default()
+        };
+
         vec![
             if_,
             for_,
@@ -259,12 +243,10 @@ impl AppState {
             match_,
             use_as_,
             use_,
-            section_,
-            section_body_,
             child_content_,
-            include_,
             rust_block_,
             rust_expr_paren_,
+            fn_,
         ]
     }
 }

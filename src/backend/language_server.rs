@@ -4,15 +4,16 @@ use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspac
 use crate::backend::tree_extensions::TreeExtensions;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, InitializeResult,
-    InitializedParams, MessageType, SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
-    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind,
+    CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
+    SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
+    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
+    SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
-
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
@@ -30,7 +31,7 @@ impl LanguageServer for Backend {
                 .log_message(MessageType::INFO, format!("Workspace root path: {path:?}"))
                 .await;
 
-            let mut workspace = self.state.workspace.write().unwrap();
+            let mut workspace = self.state.workspace.write().await;
             workspace.load(&path).unwrap_or_else(|e| {
                 debug!("Workspace couldn't load: {}", e);
             });
@@ -39,7 +40,9 @@ impl LanguageServer for Backend {
         debug!("Sending an initialize response.");
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::INCREMENTAL)),
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(
+                    TextDocumentSyncKind::INCREMENTAL,
+                )),
                 // text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
                 //     open_close: Some(true),
                 //     change: Some(TextDocumentSyncKind::INCREMENTAL),
@@ -66,7 +69,9 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        self.client.log_message(MessageType::INFO, "rshtml LSP initialized!").await;
+        self.client
+            .log_message(MessageType::INFO, "rshtml LSP initialized!")
+            .await;
     }
 
     async fn shutdown(&self) -> Result<(), Error> {
@@ -80,40 +85,52 @@ impl LanguageServer for Backend {
         let uri_str = params.text_document.uri.to_string();
         let text = params.text_document.text;
 
-        let tree = if let Ok(mut parser) = self.state.parser.lock()
-            && let Some(tree) = parser.parse(&text, None)
-        {
-            tree
-        } else {
-            self.client
-                .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
-                .await;
-            return;
-        };
+        let tree = {
+            let mut parser = self.state.parser.lock().await;
 
-        let include_paths = tree.find_includes(&self.state.language, &text);
-        debug!("Include paths: {:?}", include_paths);
+            if let Some(tree) = parser.parse(&text, None) {
+                tree
+            } else {
+                self.client
+                    .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
+                    .await;
+                return;
+            }
+        };
 
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
-        let extends = tree.find_extends(&self.state.language, &text);
-        let layout_path = extends.and_then(|extends| self.state.find_layout(&params.text_document.uri, extends.as_deref()));
-        debug!("Layout path: {:?}", layout_path);
+        let views_path = {
+            let file_path = &params.text_document.uri.to_file_path().unwrap_or_default();
+            let workspace = self.state.workspace.read().await;
+            let member = workspace.get_member_by_view(&file_path).unwrap();
 
-        let section_names = tree.find_sections(&self.state.language, &text);
-        debug!("Sections: {:?}", section_names);
+            member.views_path.clone()
+        };
+
+        let mut use_directives_with_params = Vec::new();
+        for (use_path, use_name) in &use_directives {
+            let use_params = self
+                .state
+                .find_use_params(&views_path.join(use_path))
+                .await
+                .unwrap_or(Vec::new());
+            debug!("use params: {use_params:?}");
+            use_directives_with_params.push((use_path.to_owned(), use_name.to_owned(), use_params))
+        }
+
+        let template_params = tree.find_template_params(&self.state.language, &text);
+        debug!("Template params: {:?}", template_params);
 
         let errors = {
             let mut view = View::new(text, tree, params.text_document.version as usize);
-            view.layout_path = layout_path;
-            view.include_paths = include_paths;
-            view.use_directives = use_directives;
+            view.use_directives = use_directives_with_params;
             view.create_use_directive_completion_items();
-            view.section_names = section_names;
-            view.create_section_completion_items();
+            view.template_params = template_params;
+            view.create_fn_completion_items();
 
-            let mut views = self.state.views.write().unwrap();
+            let mut views = self.state.views.write().await;
 
             let errors = view.tree.find_error(&self.state.language, &view.source);
 
@@ -123,7 +140,11 @@ impl LanguageServer for Backend {
         };
 
         self.client
-            .publish_diagnostics(params.text_document.uri, errors, Some(params.text_document.version))
+            .publish_diagnostics(
+                params.text_document.uri,
+                errors,
+                Some(params.text_document.version),
+            )
             .await;
     }
 
@@ -133,45 +154,83 @@ impl LanguageServer for Backend {
 
         let uri_str = params.text_document.uri.to_string();
 
-        let errors = if let Ok(mut views) = self.state.views.write()
-            && let Some(view) = views.get_mut(&uri_str)
-        {
-            if view.version >= params.text_document.version as usize {
-                return;
-            }
+        let (new_uses, errors) = {
+            let mut views = self.state.views.write().await;
 
-            self.process_changes(params.content_changes, &mut view.source, &mut view.tree);
+            if let Some(view) = views.get_mut(&uri_str) {
+                if view.version >= params.text_document.version as usize {
+                    return;
+                }
 
-            if let Ok(mut parser) = self.state.parser.lock()
-                && let Some(tree) = parser.parse(&view.source, Some(&view.tree))
-            {
-                let extends = tree.find_extends(&self.state.language, &view.source);
-                let layout_path = extends.and_then(|extends| self.state.find_layout(&params.text_document.uri, extends.as_deref()));
+                self.process_changes(params.content_changes, &mut view.source, &mut view.tree);
 
-                let include_paths = tree.find_includes(&self.state.language, &view.source);
+                let tree = {
+                    let mut parser = self.state.parser.lock().await;
+                    if let Some(tree) = parser.parse(&view.source, Some(&view.tree)) {
+                        tree
+                    } else {
+                        error!("Error while parsing tree");
+                        return;
+                    }
+                };
+
                 let use_directives = tree.find_uses(&self.state.language, &view.source);
-                let section_names = tree.find_sections(&self.state.language, &view.source);
+                let template_params = tree.find_template_params(&self.state.language, &view.source);
 
                 view.version = params.text_document.version as usize;
                 view.tree = tree;
-                view.layout_path = layout_path;
-                view.include_paths = include_paths;
-                view.use_directives = use_directives;
-                view.update_use_directive_completion_items();
-                view.section_names = section_names;
+                let new_uses = view.sync_use_directives(use_directives);
 
-                view.tree.find_error(&self.state.language, &view.source)
+                view.template_params = template_params;
+
+                (
+                    new_uses,
+                    view.tree.find_error(&self.state.language, &view.source),
+                )
             } else {
-                error!("Error while parsing tree");
+                error!("view {uri_str} not found");
                 return;
             }
-        } else {
-            error!("Error while locked views");
-            return;
         };
 
+        let views_path = {
+            let file_path = &params.text_document.uri.to_file_path().unwrap_or_default();
+            let workspace = self.state.workspace.read().await;
+            let member = workspace.get_member_by_view(&file_path).unwrap();
+
+            member.views_path.clone()
+        };
+
+        let mut new_uses_params = Vec::new();
+        for (id, use_path) in new_uses {
+            let use_params = self
+                .state
+                .find_use_params(&views_path.join(use_path))
+                .await
+                .unwrap_or_default();
+
+            new_uses_params.push((id, use_params));
+        }
+
+        {
+            let mut views = self.state.views.write().await;
+            if let Some(view) = views.get_mut(&uri_str) {
+                for (id, use_params) in new_uses_params {
+                    if let Some(use_directive) = view.use_directives.get_mut(id) {
+                        use_directive.2 = use_params;
+                    }
+                }
+
+                view.update_use_directive_completion_items();
+            }
+        }
+
         self.client
-            .publish_diagnostics(params.text_document.uri, errors, Some(params.text_document.version))
+            .publish_diagnostics(
+                params.text_document.uri,
+                errors,
+                Some(params.text_document.version),
+            )
             .await;
     }
 
@@ -180,17 +239,19 @@ impl LanguageServer for Backend {
         self.client.log_message(MessageType::INFO, msg).await;
         let uri_str = params.text_document.uri.to_string();
 
-        if let Ok(mut views) = self.state.views.write() {
-            views.remove(&uri_str);
-        }
+        let mut views = self.state.views.write().await;
+        views.remove(&uri_str);
     }
 
-    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>, Error> {
         let uri_str = params.text_document.uri.to_string();
 
-        if let Ok(mut views) = self.state.views.write()
-            && let Some(view) = views.get_mut(&uri_str)
-        {
+        let mut views = self.state.views.write().await;
+
+        if let Some(view) = views.get_mut(&uri_str) {
             let highlight = &self.state.highlight;
             let tokens = highlight.highlight(&view.source, None)?;
 
@@ -217,9 +278,9 @@ impl LanguageServer for Backend {
         let uri_str = params.text_document.uri.to_string();
         let result_id = params.previous_result_id;
 
-        if let Ok(mut views) = self.state.views.write()
-            && let Some(view) = views.get_mut(&uri_str)
-        {
+        let mut views = self.state.views.write().await;
+
+        if let Some(view) = views.get_mut(&uri_str) {
             let highlight = &self.state.highlight;
             let tokens = highlight.highlight(&view.source, None)?;
 
@@ -234,9 +295,14 @@ impl LanguageServer for Backend {
                 return Ok(Some(SemanticTokensFullDeltaResult::Tokens(semantic_tokens)));
             }
 
-            let tokens_diff = highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
+            let tokens_diff =
+                highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
 
-            debug!("Semantic Tokens Delta: {:?} {:?}", tokens_diff.len(), tokens_diff);
+            debug!(
+                "Semantic Tokens Delta: {:?} {:?}",
+                tokens_diff.len(),
+                tokens_diff
+            );
 
             view.semantic_tokens_version += 1;
             view.semantic_tokens = SemanticTokens {
@@ -244,22 +310,27 @@ impl LanguageServer for Backend {
                 data: tokens.clone(),
             };
 
-            return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
-                result_id: Some(view.semantic_tokens_version.to_string()),
-                edits: tokens_diff,
-            })));
+            return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(
+                SemanticTokensDelta {
+                    result_id: Some(view.semantic_tokens_version.to_string()),
+                    edits: tokens_diff,
+                },
+            )));
         }
 
         Ok(None)
     }
 
-    async fn semantic_tokens_range(&self, params: SemanticTokensRangeParams) -> jsonrpc::Result<Option<SemanticTokensRangeResult>> {
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> jsonrpc::Result<Option<SemanticTokensRangeResult>> {
         let uri_str = params.text_document.uri.to_string();
         let range = params.range;
 
-        if let Ok(views) = self.state.views.write()
-            && let Some(view) = views.get(&uri_str)
-        {
+        let views = self.state.views.read().await;
+
+        if let Some(view) = views.get(&uri_str) {
             let highlight = &self.state.highlight;
             let start_byte = Self::position_to_byte_offset(&view.source, range.start);
             let end_byte = Self::position_to_byte_offset(&view.source, range.end);
@@ -275,13 +346,19 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    async fn completion(&self, params: CompletionParams) -> jsonrpc::Result<Option<CompletionResponse>> {
+    async fn completion(
+        &self,
+        params: CompletionParams,
+    ) -> jsonrpc::Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
-        let trigger_char = params.context.and_then(|ctx| ctx.trigger_character).and_then(|s| s.chars().next());
+        let trigger_char = params
+            .context
+            .and_then(|ctx| ctx.trigger_character)
+            .and_then(|s| s.chars().next());
 
-        if let Ok(views) = self.state.views.read()
-            && let Some(view) = views.get(&uri.to_string())
-        {
+        let views = self.state.views.read().await;
+
+        if let Some(view) = views.get(&uri.to_string()) {
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
             if let Some(tc) = trigger_char {
@@ -302,27 +379,6 @@ impl LanguageServer for Backend {
                 completion_items.extend(self.state.completion_items.clone());
             }
 
-            if Some('@') == trigger_char || trigger_char.is_none() {
-                for v in views.values() {
-                    let is_layout = uri.to_file_path().map(|x| v.layout_path == Some(x)).unwrap_or(false);
-                    if is_layout {
-                        let items = v
-                            .completion_items
-                            .iter()
-                            .filter_map(|(name, value)| {
-                                if name.starts_with("section_") {
-                                    Some(value.1.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>();
-
-                        completion_items.extend(items);
-                    }
-                }
-            }
-
             return Ok(Some(CompletionResponse::List(CompletionList {
                 is_incomplete: true,
                 items: completion_items,
@@ -334,7 +390,10 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let cargo_toml_changed = params.changes.iter().any(|event| event.uri.path().ends_with("/Cargo.toml"));
+        let cargo_toml_changed = params
+            .changes
+            .iter()
+            .any(|event| event.uri.path().ends_with("/Cargo.toml"));
 
         if !cargo_toml_changed {
             return;
@@ -342,12 +401,12 @@ impl LanguageServer for Backend {
 
         debug!("Cargo.toml changed. Re-analyzing...");
 
-        if let Ok(mut workspace) = self.state.workspace.write() {
-            let root = workspace.root.clone();
-            workspace.load(&root).unwrap_or_else(|e| {
-                debug!("Workspace couldn't load: {}", e);
-            });
-        }
+        let mut workspace = self.state.workspace.write().await;
+
+        let root = workspace.root.clone();
+        workspace.load(&root).unwrap_or_else(|e| {
+            debug!("Workspace couldn't load: {}", e);
+        });
 
         debug!("Workspace re-analysis complete.");
     }

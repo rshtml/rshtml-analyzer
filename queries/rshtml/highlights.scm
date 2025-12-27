@@ -1,5 +1,4 @@
-(start_symbol) @operator
-(hash_symbol) @operator
+(start_symbol) @keyword
 (hash_symbol) @punctuation.special
 
 (open_paren) @punctuation.bracket
@@ -13,33 +12,28 @@
 
 (string_line) @string
 
-(comment_block) @comment
+(comment_block) @comment.block
 (open_comment) @operator
 (close_comment) @operator
 
-(continue_) @keyword
-(break_) @keyword
+(continue_) @keyword.control.conditional
+(break_) @keyword.control.conditional
 
-(extends_) @keyword
+
 (raw_) @keyword
-
-(include_) @keyword
-(render_) @keyword
-(render_body_) @keyword
 (child_content_) @keyword
-(section_) @keyword
 
-(section_block
-  name: (rust_identifier) @namespace)
-
-(use_) @keyword
-(as_) @keyword
-
-(number) @number
-(bool) @boolean
-
+(as_) @keyword.operator
 (as_clause
-  alias: (rust_identifier) @type)
+  alias: (component_tag_identifier) @type)
+(
+  (start_symbol) @keyword.control.import
+  .
+  (use_directive (use_) @keyword.control.import)
+)
+
+(number) @constant.numeric
+(bool) @constant.builtin.boolean
 
 (tag_open) @punctuation.bracket
 (tag_close) @punctuation.bracket
@@ -47,14 +41,55 @@
 (tag_self_close) @punctuation.bracket
 
 (component_tag
-  name: (component_tag_identifier) @type)
+  name: (component_tag_identifier) @tag)
 
 (component_tag
-  name_close: (component_tag_identifier) @type)
+  name_close: (component_tag_identifier) @tag)
 
 (component_tag_parameter
-  name: (rust_identifier) @variable.parameter)
+  name: (rust_identifier) @attribute)
+
+(
+  (start_symbol) @function.method
+  .
+  (rust_expr_simple)
+)
+
+(
+  (start_symbol) @function.method
+  .
+  (rust_expr_paren)
+)
+
+(
+  (start_symbol) @keyword.directive
+  .
+  (rust_block)
+)
+
+(
+  (start_symbol) @keyword.control.conditional
+  .
+  (if_stmt)
+)
+(
+  (start_symbol) @keyword
+  .
+  (for_stmt)
+)
+(
+  (start_symbol) @keyword.control.repeat
+  .
+  (while_stmt)
+)
+(
+  (start_symbol) @keyword.control.conditional
+  .
+  (match_stmt)
+)
+
+(param_name) @variable.parameter
 
 ;this is for now extra
 (else_clause
-  head: (source_text) @keyword)
+  head: (rust_text) @keyword.control.conditional)
