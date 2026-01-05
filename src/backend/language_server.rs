@@ -2,6 +2,7 @@ use crate::app_state::view::View;
 use crate::backend::Backend;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
+use crate::rust_analyzer::RustAnalyzer;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse,
@@ -98,6 +99,32 @@ impl LanguageServer for Backend {
             }
         };
 
+        let struct_info =
+            params
+                .text_document
+                .uri
+                .to_file_path()
+                .ok()
+                .and_then(|rshtml_file_path| {
+                    let root_path = self.state.workspace.try_read().ok()?.root.clone();
+
+                    RustAnalyzer::find_struct_for_rshtml(&root_path, &rshtml_file_path).map(
+                        |(struct_path, struct_name)| {
+                            RustAnalyzer::analyze(
+                                &self.state.language,
+                                &tree,
+                                &text,
+                                &struct_path,
+                                &struct_name,
+                            );
+
+                            (struct_path, struct_name)
+                        },
+                    )
+                });
+
+        debug!("struct info: {struct_info:?}");
+
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
@@ -134,6 +161,7 @@ impl LanguageServer for Backend {
             view.use_directives = use_directives_with_params;
             view.create_use_directive_completion_items();
             view.template_params = template_params;
+            view.struct_info = struct_info;
 
             let mut views = self.state.views.write().await;
 

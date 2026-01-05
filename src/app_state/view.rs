@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens};
 use tree_sitter::Tree;
 
@@ -10,6 +13,7 @@ pub struct View {
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
     pub semantic_tokens_version: u64,
+    pub struct_info: Option<(PathBuf, String)>,
 
     pub version: usize,
 }
@@ -24,6 +28,7 @@ impl View {
             completion_items: HashMap::new(),
             semantic_tokens: SemanticTokens::default(),
             semantic_tokens_version: 0,
+            struct_info: None,
             version,
         }
     }

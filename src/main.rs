@@ -1,11 +1,12 @@
 mod app_state;
 mod backend;
 mod consts;
+mod rust_analyzer;
 
 use crate::app_state::AppState;
 use crate::backend::Backend;
-use tower_lsp::{LspService, Server};
 use clap::Parser;
+use tower_lsp::{LspService, Server};
 
 #[derive(Parser)]
 struct Cli {
