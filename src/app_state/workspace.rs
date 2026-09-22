@@ -80,19 +80,16 @@ impl Workspace {
 
     fn load_manifest<'a>(&self, cargo_toml: &'a Value) -> Result<&'a str, String> {
         let default_path = "views";
-        match cargo_toml
-            .get("package.metadata.rshtml")
-            .and_then(|x| x.get("views"))
-        {
-            Some(x) => {
-                let path = x
-                    .get("path")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or(default_path);
-                Ok(path)
-            }
-            None => Ok(default_path),
-        }
+        let path = cargo_toml
+            .get("package")
+            .and_then(|p| p.get("metadata"))
+            .and_then(|m| m.get("rshtml"))
+            .and_then(|r| r.get("views"))
+            .and_then(|v| v.get("path"))
+            .and_then(|p| p.as_str())
+            .unwrap_or(default_path);
+
+        Ok(path)
     }
 
     pub fn get_member_by_view(&self, view_path: &Path) -> Option<&Member> {
@@ -112,4 +109,61 @@ impl Workspace {
 
     //     None
     // }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_manifest_default() {
+        let ws = Workspace::default();
+        let cargo_toml: Value = toml::from_str("[package]\nname = \"my-project\"\n").unwrap();
+        let path = ws.load_manifest(&cargo_toml).unwrap();
+        assert_eq!(path, "views");
+    }
+
+    #[test]
+    fn test_load_manifest_custom_path() {
+        let ws = Workspace::default();
+        let cargo_toml: Value = toml::from_str(
+            r#"
+            [package]
+            name = "my-project"
+
+            [package.metadata.rshtml.views]
+            path = "src/templates"
+            "#,
+        )
+        .unwrap();
+        let path = ws.load_manifest(&cargo_toml).unwrap();
+        assert_eq!(path, "src/templates");
+    }
+
+    #[test]
+    fn test_get_member_by_view() {
+        let mut ws = Workspace::default();
+        ws.members = vec![
+            Member {
+                path: PathBuf::from("/home/user/project/crate_a"),
+                views_path: PathBuf::from("/home/user/project/crate_a/views"),
+            },
+            Member {
+                path: PathBuf::from("/home/user/project/crate_b"),
+                views_path: PathBuf::from("/home/user/project/crate_b/views"),
+            },
+        ];
+
+        let member =
+            ws.get_member_by_view(Path::new("/home/user/project/crate_a/views/index.rs.html"));
+        assert!(member.is_some());
+        assert_eq!(
+            member.unwrap().path,
+            PathBuf::from("/home/user/project/crate_a")
+        );
+
+        let non_member =
+            ws.get_member_by_view(Path::new("/home/user/project/crate_c/views/index.rs.html"));
+        assert!(non_member.is_none());
+    }
 }

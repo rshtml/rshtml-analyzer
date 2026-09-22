@@ -94,7 +94,11 @@ impl View {
             kind: Some(CompletionItemKind::STRUCT),
             detail: Some(format!("{use_name} component")),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
-            insert_text: Some(format!("{use_name} {snippet_params}/>")),
+            insert_text: Some(if snippet_params.is_empty() {
+                format!("{use_name}/>")
+            } else {
+                format!("{use_name} {snippet_params}/>")
+            }),
             sort_text: Some("01".to_string()),
             ..Default::default()
         };
@@ -126,5 +130,91 @@ impl View {
                     Self::use_directive_completion_item(use_name, &params)
                 });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    fn dummy_tree() -> Tree {
+        let mut parser = Parser::new();
+        let lang = tree_sitter_rshtml::LANGUAGE.into();
+        parser.set_language(&lang).unwrap();
+        parser.parse("", None).unwrap()
+    }
+
+    #[test]
+    fn test_use_directives_names_and_params() {
+        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        view.use_directives = vec![
+            (
+                "components/button.rs.html".to_string(),
+                Some("Button".to_string()),
+                vec!["label".to_string()],
+            ),
+            ("views/header.rs.html".to_string(), None, vec![]),
+        ];
+
+        let res = view.use_directives_names_and_params();
+        assert_eq!(res.len(), 2);
+        assert_eq!(res[0], ("Button".to_string(), vec!["label".to_string()]));
+        assert_eq!(res[1], ("header".to_string(), vec![]));
+    }
+
+    #[test]
+    fn test_sync_use_directives() {
+        let mut view = View::new("".to_string(), dummy_tree(), 1);
+
+        // Initial sync
+        let new_uses = view.sync_use_directives(vec![(
+            "components/button.rs.html".to_string(),
+            Some("Button".to_string()),
+        )]);
+        assert_eq!(new_uses.len(), 1);
+        assert_eq!(new_uses[0], (0, "components/button.rs.html".to_string()));
+
+        // Add dummy param to button
+        view.use_directives[0].2 = vec!["variant".to_string()];
+
+        // Sync identical list -> returns empty and keeps existing params
+        let new_uses2 = view.sync_use_directives(vec![(
+            "components/button.rs.html".to_string(),
+            Some("Button".to_string()),
+        )]);
+        assert!(new_uses2.is_empty());
+        assert_eq!(view.use_directives[0].2, vec!["variant".to_string()]);
+
+        // Sync with a new directive and removing button
+        let new_uses3 = view.sync_use_directives(vec![(
+            "views/card.rs.html".to_string(),
+            Some("Card".to_string()),
+        )]);
+        assert_eq!(new_uses3.len(), 1);
+        assert_eq!(view.use_directives.len(), 1);
+        assert_eq!(view.use_directives[0].0, "views/card.rs.html");
+    }
+
+    #[test]
+    fn test_completion_items_generation() {
+        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        view.use_directives = vec![(
+            "components/button.rs.html".to_string(),
+            Some("Button".to_string()),
+            vec!["label".to_string(), "active".to_string()],
+        )];
+
+        view.create_use_directive_completion_items();
+
+        let item = view.completion_items.get("Button");
+        assert!(item.is_some());
+        let (trigger, completion) = item.unwrap();
+        assert_eq!(*trigger, '<');
+        assert_eq!(completion.label, "Button");
+        assert_eq!(
+            completion.insert_text,
+            Some("Button label=\"${1:label}\" active=\"${2:active}\"/>".to_string())
+        );
     }
 }
