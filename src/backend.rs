@@ -1,11 +1,13 @@
 mod language_server;
+pub mod navigation;
 pub mod semantic_tokens_builder;
 mod server_capabilities;
 pub mod tree_extensions;
 
 use crate::app_state::AppState;
+use std::path::PathBuf;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent};
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
 use tree_sitter::{Point, Tree};
 
 pub struct Backend {
@@ -19,6 +21,13 @@ impl Backend {
             client,
             state: app_state,
         }
+    }
+
+    pub async fn get_views_path_for_uri(&self, uri: &Url) -> Option<PathBuf> {
+        let file_path = uri.to_file_path().ok()?;
+        let workspace = self.state.workspace.read().await;
+        let member = workspace.get_member_by_view(&file_path)?;
+        Some(member.views_path.clone())
     }
 
     pub fn position_to_byte_offset(text: &str, position: Position) -> usize {

@@ -1,13 +1,16 @@
 use crate::app_state::view::View;
 use crate::backend::Backend;
+use crate::backend::navigation::resolve_target_at_position;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, InitializeParams, InitializeResult, InitializedParams, MessageType,
-    SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
+    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, MessageType,
+    OneOf, SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams,
+    SemanticTokensFullDeltaResult,
     SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
     SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
     TextDocumentSyncKind,
@@ -57,6 +60,8 @@ impl LanguageServer for Backend {
                     trigger_characters: Some(vec!["@".to_string(), "<".to_string()]),
                     ..Default::default()
                 }),
+                definition_provider: Some(OneOf::Left(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 workspace: workspace_capabilities(),
                 //position_encoding:Some(PositionEncodingKind::UTF8),
                 ..Default::default()
@@ -396,6 +401,61 @@ impl LanguageServer for Backend {
         }
 
         debug!("Error while getting completion items");
+        Ok(None)
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> jsonrpc::Result<Option<GotoDefinitionResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let views_path = match self.get_views_path_for_uri(uri).await {
+            Some(path) => path,
+            None => return Ok(None),
+        };
+
+        let views = self.state.views.read().await;
+        if let Some(view) = views.get(&uri.to_string()) {
+            if let Some(target) = resolve_target_at_position(
+                &view.tree,
+                &view.source,
+                position,
+                &view.use_directives,
+                &views_path,
+            ) {
+                if let Some(location) = target.to_location() {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn hover(&self, params: HoverParams) -> jsonrpc::Result<Option<Hover>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let views_path = match self.get_views_path_for_uri(uri).await {
+            Some(path) => path,
+            None => return Ok(None),
+        };
+
+        let views = self.state.views.read().await;
+        if let Some(view) = views.get(&uri.to_string()) {
+            if let Some(target) = resolve_target_at_position(
+                &view.tree,
+                &view.source,
+                position,
+                &view.use_directives,
+                &views_path,
+            ) {
+                return Ok(Some(target.to_hover()));
+            }
+        }
+
         Ok(None)
     }
 
