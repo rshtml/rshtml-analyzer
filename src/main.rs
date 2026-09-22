@@ -4,12 +4,15 @@ mod consts;
 
 use crate::app_state::AppState;
 use crate::backend::Backend;
-use tower_lsp::{LspService, Server};
 use clap::Parser;
+use tower_lsp::{LspService, Server};
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Run in stdio mode (used by LSP clients like Zed / VSCode)"
+    )]
     stdio: bool,
 
     #[arg(short = 'V', long, help = "Prints version information")]
@@ -23,7 +26,12 @@ use tracing::debug;
 async fn main() {
     let cli = Cli::parse();
     if cli.version {
-        println!("{}", env!("CARGO_PKG_VERSION"));
+        let mode = if cfg!(debug_assertions) {
+            "dev/debug"
+        } else {
+            "release"
+        };
+        println!("rshtml-analyzer {} ({})", env!("CARGO_PKG_VERSION"), mode);
         return;
     }
 
@@ -38,11 +46,14 @@ async fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    #[cfg(debug_assertions)]
-    tcp_connection().await;
-
-    #[cfg(not(debug_assertions))]
-    stdio_connection().await;
+    // If --stdio is specified or if built in release mode, default to stdio.
+    // In debug builds without --stdio, default to TCP for debugging.
+    if cli.stdio || !cfg!(debug_assertions) {
+        stdio_connection().await;
+    } else {
+        #[cfg(debug_assertions)]
+        tcp_connection().await;
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -67,7 +78,6 @@ async fn tcp_connection() {
     }
 }
 
-#[cfg(not(debug_assertions))]
 async fn stdio_connection() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

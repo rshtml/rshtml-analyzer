@@ -21,7 +21,12 @@ use tracing::{debug, error};
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult, Error> {
-        debug!("The Initialize request has been received and is being processed...");
+        let build_mode = if cfg!(debug_assertions) {
+            "dev/debug"
+        } else {
+            "release"
+        };
+        debug!("The Initialize request has been received (build: {})...", build_mode);
         let workspace_root_path = params
             .workspace_folders
             .as_ref()
@@ -68,7 +73,7 @@ impl LanguageServer for Backend {
             },
             server_info: Some(ServerInfo {
                 name: "rshtml-analyzer".to_string(),
-                version: Some(env!("CARGO_PKG_VERSION").to_string()),
+                version: Some(format!("{} ({build_mode})", env!("CARGO_PKG_VERSION"))),
             }),
         })
     }
