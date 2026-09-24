@@ -1,5 +1,6 @@
 use crate::app_state::view::View;
 use crate::backend::Backend;
+use crate::backend::context::detect_context_at_position;
 use crate::backend::navigation::resolve_target_at_position;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
@@ -10,10 +11,9 @@ use tower_lsp::lsp_types::{
     DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
     HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, MessageType,
     OneOf, SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams,
-    SemanticTokensFullDeltaResult,
-    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
-    SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
-    TextDocumentSyncKind,
+    SemanticTokensFullDeltaResult, SemanticTokensParams, SemanticTokensRangeParams,
+    SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -26,7 +26,11 @@ impl LanguageServer for Backend {
         } else {
             "release"
         };
-        debug!("The Initialize request has been received (build: {})...", build_mode);
+        debug!(
+            "The Initialize request has been received (build: {})...",
+            build_mode
+        );
+
         let workspace_root_path = params
             .workspace_folders
             .as_ref()
@@ -51,14 +55,6 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
-                // text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
-                //     open_close: Some(true),
-                //     change: Some(TextDocumentSyncKind::INCREMENTAL),
-                //     will_save: Some(true),
-                //     will_save_wait_until: Some(true),
-                //     save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions { include_text: Some(false) })),
-                // })),
-                //document_formatting_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
@@ -68,7 +64,6 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 workspace: workspace_capabilities(),
-                //position_encoding:Some(PositionEncodingKind::UTF8),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -79,8 +74,27 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        let build_mode = if cfg!(debug_assertions) {
+            "dev/debug"
+        } else {
+            "release"
+        };
+        let version_msg = format!(
+            "rshtml-analyzer v{} ({build_mode}) connected!",
+            env!("CARGO_PKG_VERSION")
+        );
+
+        if cfg!(debug_assertions) {
+            self.client
+                .show_message(MessageType::INFO, &version_msg)
+                .await;
+        }
+
         self.client
-            .log_message(MessageType::INFO, "rshtml LSP initialized!")
+            .log_message(
+                MessageType::INFO,
+                format!("{version_msg} Handshake completed."),
+            )
             .await;
     }
 
@@ -111,19 +125,13 @@ impl LanguageServer for Backend {
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
-        let views_path = {
-            let file_path = &params.text_document.uri.to_file_path().unwrap_or_default();
-            let workspace = self.state.workspace.read().await;
-
-            let member = if let Some(member) = workspace.get_member_by_view(file_path) {
-                member
+        let views_path =
+            if let Some(path) = self.get_views_path_for_uri(&params.text_document.uri).await {
+                path
             } else {
-                error!("view {file_path:?} not found");
+                error!("view {:?} not found in workspace", params.text_document.uri);
                 return;
             };
-
-            member.views_path.clone()
-        };
 
         let mut use_directives_with_params = Vec::new();
         for (use_path, use_name) in &use_directives {
@@ -208,18 +216,13 @@ impl LanguageServer for Backend {
             }
         };
 
-        let views_path = {
-            let file_path = &params.text_document.uri.to_file_path().unwrap_or_default();
-            let workspace = self.state.workspace.read().await;
-            let member = if let Some(member) = workspace.get_member_by_view(file_path) {
-                member
+        let views_path =
+            if let Some(path) = self.get_views_path_for_uri(&params.text_document.uri).await {
+                path
             } else {
-                error!("view {file_path:?} not found");
+                error!("view {:?} not found in workspace", params.text_document.uri);
                 return;
             };
-
-            member.views_path.clone()
-        };
 
         let mut new_uses_params = Vec::new();
         for (id, use_path) in new_uses {
@@ -371,6 +374,7 @@ impl LanguageServer for Backend {
         params: CompletionParams,
     ) -> jsonrpc::Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
         let trigger_char = params
             .context
             .and_then(|ctx| ctx.trigger_character)
@@ -379,21 +383,28 @@ impl LanguageServer for Backend {
         let views = self.state.views.read().await;
 
         if let Some(view) = views.get(&uri.to_string()) {
+            let syntax_context = detect_context_at_position(&view.tree, &view.source, position);
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
             if let Some(tc) = trigger_char {
-                for (item_char, item) in view.completion_items.values() {
-                    if *item_char == tc {
-                        completion_items.push(item.clone());
+                // If trigger was '<', only complete component tags if we are in an HTML context.
+                // In Rust code or template param types (e.g. `Vec<String>`), suppress component tag completions.
+                if tc == '<' {
+                    if syntax_context.allows_component_completion() {
+                        for (item_char, item) in view.completion_items.values() {
+                            if *item_char == '<' {
+                                completion_items.push(item.clone());
+                            }
+                        }
                     }
-                }
-
-                if tc == '@' {
+                } else if tc == '@' {
                     completion_items.extend(self.state.completion_items.clone());
                 }
             } else {
-                for (_, item) in view.completion_items.values() {
-                    completion_items.push(item.clone());
+                if syntax_context.allows_component_completion() {
+                    for (_, item) in view.completion_items.values() {
+                        completion_items.push(item.clone());
+                    }
                 }
 
                 completion_items.extend(self.state.completion_items.clone());
