@@ -1,3 +1,4 @@
+pub mod context;
 mod language_server;
 pub mod navigation;
 pub mod semantic_tokens_builder;
