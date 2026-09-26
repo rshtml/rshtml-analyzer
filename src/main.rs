@@ -26,12 +26,11 @@ use tracing::debug;
 async fn main() {
     let cli = Cli::parse();
     if cli.version {
-        let mode = if cfg!(debug_assertions) {
-            "dev/debug"
-        } else {
-            "release"
-        };
-        println!("rshtml-analyzer {} ({})", env!("CARGO_PKG_VERSION"), mode);
+        println!(
+            "rshtml-analyzer {} ({})",
+            env!("CARGO_PKG_VERSION"),
+            consts::BUILD_MODE
+        );
         return;
     }
 

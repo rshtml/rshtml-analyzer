@@ -1,8 +1,8 @@
-pub mod context;
 mod language_server;
-pub mod navigation;
+pub mod navigation_target;
 pub mod semantic_tokens_builder;
 mod server_capabilities;
+pub mod syntax_context;
 pub mod tree_extensions;
 
 use crate::app_state::AppState;

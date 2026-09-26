@@ -38,3 +38,9 @@ pub const SEMANTIC_TOKEN_MODIFIERS: [SemanticTokenModifier; 10] = [
     SemanticTokenModifier::DOCUMENTATION,
     SemanticTokenModifier::DEFAULT_LIBRARY,
 ];
+
+pub const BUILD_MODE: &str = if cfg!(debug_assertions) {
+    "dev/debug"
+} else {
+    "release"
+};

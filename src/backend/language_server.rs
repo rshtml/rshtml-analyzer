@@ -1,19 +1,21 @@
 use crate::app_state::view::View;
 use crate::backend::Backend;
-use crate::backend::context::detect_context_at_position;
-use crate::backend::navigation::resolve_target_at_position;
+use crate::backend::navigation_target::NavigationTarget;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
+use crate::backend::syntax_context::SyntaxContext;
 use crate::backend::tree_extensions::TreeExtensions;
+use crate::consts;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionList, CompletionOptions, CompletionParams, CompletionResponse,
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, MessageType,
-    OneOf, SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams,
-    SemanticTokensFullDeltaResult, SemanticTokensParams, SemanticTokensRangeParams,
-    SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind,
+    CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
+    CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, InitializedParams, InsertTextFormat, Location,
+    MarkupContent, MarkupKind, MessageType, OneOf, Range, SemanticTokens, SemanticTokensDelta,
+    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
+    SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -21,14 +23,9 @@ use tracing::{debug, error};
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult, Error> {
-        let build_mode = if cfg!(debug_assertions) {
-            "dev/debug"
-        } else {
-            "release"
-        };
         debug!(
             "The Initialize request has been received (build: {})...",
-            build_mode
+            consts::BUILD_MODE
         );
 
         let workspace_root_path = params
@@ -68,20 +65,20 @@ impl LanguageServer for Backend {
             },
             server_info: Some(ServerInfo {
                 name: "rshtml-analyzer".to_string(),
-                version: Some(format!("{} ({build_mode})", env!("CARGO_PKG_VERSION"))),
+                version: Some(format!(
+                    "{} ({})",
+                    env!("CARGO_PKG_VERSION"),
+                    consts::BUILD_MODE
+                )),
             }),
         })
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let build_mode = if cfg!(debug_assertions) {
-            "dev/debug"
-        } else {
-            "release"
-        };
         let version_msg = format!(
-            "rshtml-analyzer v{} ({build_mode}) connected!",
-            env!("CARGO_PKG_VERSION")
+            "rshtml-analyzer v{} ({}) connected!",
+            env!("CARGO_PKG_VERSION"),
+            consts::BUILD_MODE
         );
 
         if cfg!(debug_assertions) {
@@ -383,31 +380,56 @@ impl LanguageServer for Backend {
         let views = self.state.views.read().await;
 
         if let Some(view) = views.get(&uri.to_string()) {
-            let syntax_context = detect_context_at_position(&view.tree, &view.source, position);
+            let syntax_context = SyntaxContext::detect(&view.tree, &view.source, position);
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
-            if let Some(tc) = trigger_char {
-                // If trigger was '<', only complete component tags if we are in an HTML context.
-                // In Rust code or template param types (e.g. `Vec<String>`), suppress component tag completions.
-                if tc == '<' {
-                    if syntax_context.allows_component_completion() {
+            if syntax_context == SyntaxContext::Html {
+                if let Some(tc) = trigger_char {
+                    for (item_char, item) in view.completion_items.values() {
+                        if *item_char == tc {
+                            completion_items.push(item.clone());
+                        }
+                    }
+
+                    if tc == '@' {
+                        completion_items.extend(self.state.completion_items.clone());
+                    }
+                } else {
+                    for (_, item) in view.completion_items.values() {
+                        completion_items.push(item.clone());
+                    }
+
+                    completion_items.extend(self.state.completion_items.clone());
+                }
+            } else {
+                match syntax_context {
+                    SyntaxContext::ComponentTag => {
                         for (item_char, item) in view.completion_items.values() {
                             if *item_char == '<' {
                                 completion_items.push(item.clone());
                             }
                         }
                     }
-                } else if tc == '@' {
-                    completion_items.extend(self.state.completion_items.clone());
-                }
-            } else {
-                if syntax_context.allows_component_completion() {
-                    for (_, item) in view.completion_items.values() {
-                        completion_items.push(item.clone());
+                    SyntaxContext::ComponentParameter(component_name) => {
+                        for (name, params) in view.use_directives_names_and_params().into_iter() {
+                            if name == component_name {
+                                for param in params {
+                                    completion_items.push(CompletionItem {
+                                        insert_text: Some(format!("{}=\"$1\"", param)),
+                                        detail: Some(format!("{} attribute", component_name)),
+                                        sort_text: Some(format!("0_{}", param)),
+                                        label: param,
+                                        kind: Some(CompletionItemKind::PROPERTY),
+                                        insert_text_format: Some(InsertTextFormat::SNIPPET),
+                                        ..Default::default()
+                                    });
+                                }
+                                break;
+                            }
+                        }
                     }
+                    _ => {}
                 }
-
-                completion_items.extend(self.state.completion_items.clone());
             }
 
             return Ok(Some(CompletionResponse::List(CompletionList {
@@ -433,17 +455,25 @@ impl LanguageServer for Backend {
         };
 
         let views = self.state.views.read().await;
-        if let Some(view) = views.get(&uri.to_string()) {
-            if let Some(target) = resolve_target_at_position(
+        if let Some(view) = views.get(&uri.to_string())
+            && let Some(target) = NavigationTarget::resolve_at(
                 &view.tree,
                 &view.source,
                 position,
                 &view.use_directives,
                 &views_path,
-            ) {
-                if let Some(location) = target.to_location() {
-                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
-                }
+            )
+        {
+            let path = match target {
+                NavigationTarget::Component { target_path, .. } => target_path,
+                NavigationTarget::UseDirective { target_path, .. } => target_path,
+            };
+
+            if let Ok(uri) = Url::from_file_path(path) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri,
+                    range: Range::default(),
+                })));
             }
         }
 
@@ -460,16 +490,60 @@ impl LanguageServer for Backend {
         };
 
         let views = self.state.views.read().await;
-        if let Some(view) = views.get(&uri.to_string()) {
-            if let Some(target) = resolve_target_at_position(
+        if let Some(view) = views.get(&uri.to_string())
+            && let Some(target) = NavigationTarget::resolve_at(
                 &view.tree,
                 &view.source,
                 position,
                 &view.use_directives,
                 &views_path,
-            ) {
-                return Ok(Some(target.to_hover()));
-            }
+            )
+        {
+            let (range, markdown) = match target {
+                NavigationTarget::Component {
+                    name,
+                    target_path,
+                    range,
+                    params,
+                } => {
+                    let params_doc = if params.is_empty() {
+                        "_No parameters_".to_string()
+                    } else {
+                        params
+                            .iter()
+                            .map(|p| format!("- `{}`", p))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+
+                    let file_name = target_path
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or_default();
+
+                    let doc = format!(
+                        "### Component `<{name}>`\n\n**File:** `{file_name}`\n\n**Parameters:**\n{params_doc}"
+                    );
+
+                    (range, doc)
+                }
+                NavigationTarget::UseDirective {
+                    path,
+                    target_path: _,
+                    range,
+                } => {
+                    let doc = format!("### Component Import\n\n`{path}`");
+                    (range, doc)
+                }
+            };
+
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: markdown,
+                }),
+                range: Some(range),
+            }));
         }
 
         Ok(None)
