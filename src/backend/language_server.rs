@@ -1,6 +1,7 @@
+use crate::app_state::metadata::ViewMetaData;
 use crate::app_state::view::View;
 use crate::backend::Backend;
-use crate::backend::context::detect_context_at_position;
+use crate::backend::context::{detect_context_at_position, is_preceded_by_self};
 use crate::backend::navigation::resolve_target_at_position;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::tree_extensions::TreeExtensions;
@@ -58,7 +59,7 @@ impl LanguageServer for Backend {
                 semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec!["@".to_string(), "<".to_string()]),
+                    trigger_characters: Some(vec!["@".to_string(), "<".to_string(), ".".to_string()]),
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
@@ -153,6 +154,15 @@ impl LanguageServer for Backend {
             view.create_use_directive_completion_items();
             view.template_params = template_params;
 
+            if let Ok(file_path) = params.text_document.uri.to_file_path() {
+                let workspace = self.state.workspace.read().await;
+                if let Some(member) = workspace.get_member_by_view(&file_path) {
+                    if let Ok(rel_path) = file_path.strip_prefix(&member.path) {
+                        view.metadata = ViewMetaData::load_for_template(&member.path, &workspace.root, rel_path);
+                    }
+                }
+            }
+
             let mut views = self.state.views.write().await;
 
             let errors = view.tree.find_error(&self.state.language, &view.source);
@@ -205,6 +215,15 @@ impl LanguageServer for Backend {
                 let new_uses = view.sync_use_directives(use_directives);
 
                 view.template_params = template_params;
+
+            if let Ok(file_path) = params.text_document.uri.to_file_path() {
+                let workspace = self.state.workspace.read().await;
+                if let Some(member) = workspace.get_member_by_view(&file_path) {
+                    if let Ok(rel_path) = file_path.strip_prefix(&member.path) {
+                        view.metadata = ViewMetaData::load_for_template(&member.path, &workspace.root, rel_path);
+                    }
+                }
+            }
 
                 (
                     new_uses,
@@ -399,15 +418,23 @@ impl LanguageServer for Backend {
                     }
                 } else if tc == '@' {
                     completion_items.extend(self.state.completion_items.clone());
-                }
-            } else {
-                if syntax_context.allows_component_completion() {
-                    for (_, item) in view.completion_items.values() {
-                        completion_items.push(item.clone());
+                } else if tc == '.' {
+                    if is_preceded_by_self(&view.source, position) {
+                        completion_items.extend(view.self_field_completion_items());
                     }
                 }
+            } else {
+                if is_preceded_by_self(&view.source, position) {
+                    completion_items.extend(view.self_field_completion_items());
+                } else {
+                    if syntax_context.allows_component_completion() {
+                        for (_, item) in view.completion_items.values() {
+                            completion_items.push(item.clone());
+                        }
+                    }
 
-                completion_items.extend(self.state.completion_items.clone());
+                    completion_items.extend(self.state.completion_items.clone());
+                }
             }
 
             return Ok(Some(CompletionResponse::List(CompletionList {

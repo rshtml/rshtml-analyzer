@@ -1,4 +1,5 @@
 mod highlight;
+pub mod metadata;
 pub mod view;
 pub mod workspace;
 

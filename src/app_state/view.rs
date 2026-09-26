@@ -1,6 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens};
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
+    SemanticTokens,
+};
 use tree_sitter::Tree;
+
+use crate::app_state::metadata::ViewMetaData;
 
 pub struct View {
     pub source: String,
@@ -10,6 +15,7 @@ pub struct View {
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
     pub semantic_tokens_version: u64,
+    pub metadata: Option<ViewMetaData>,
 
     pub version: usize,
 }
@@ -24,10 +30,31 @@ impl View {
             completion_items: HashMap::new(),
             semantic_tokens: SemanticTokens::default(),
             semantic_tokens_version: 0,
+            metadata: None,
             version,
         }
     }
 
+    pub fn self_field_completion_items(&self) -> Vec<CompletionItem> {
+        let Some(ref meta) = self.metadata else {
+            return Vec::new();
+        };
+
+        meta.fields
+            .iter()
+            .map(|field| CompletionItem {
+                label: field.name.clone(),
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some(field.field_type.clone()),
+                documentation: Some(Documentation::MarkupContent(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("Field `{}` of struct `{}`", field.name, meta.struct_name),
+                })),
+                sort_text: Some(format!("00_{}", field.name)),
+                ..Default::default()
+            })
+            .collect()
+    }
     pub fn use_directives_names_and_params(&self) -> Vec<(String, Vec<String>)> {
         self.use_directives
             .iter()

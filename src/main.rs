@@ -31,7 +31,7 @@ async fn main() {
         } else {
             "release"
         };
-        println!("rshtml-analyzer {} ({})", env!("CARGO_PKG_VERSION"), mode);
+        println!("rshtml-analyzer {} ({} - built {})", env!("CARGO_PKG_VERSION"), mode, env!("BUILD_TIMESTAMP"));
         return;
     }
 

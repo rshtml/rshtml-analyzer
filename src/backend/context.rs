@@ -135,3 +135,36 @@ mod tests {
         assert!(!ctx.allows_component_completion());
     }
 }
+
+/// Checks if the cursor at `position` is immediately preceded by `self.` or `@self.`
+pub fn is_preceded_by_self(source: &str, position: Position) -> bool {
+    let byte_offset = Backend::position_to_byte_offset(source, position);
+    if byte_offset == 0 {
+        return false;
+    }
+
+    let prefix = &source[..byte_offset].trim_end();
+    prefix.ends_with("@self.") || prefix.ends_with("self.") || prefix.ends_with("@self") || prefix.ends_with("self")
+}
+
+#[cfg(test)]
+mod self_context_tests {
+    use super::*;
+
+    #[test]
+    fn test_is_preceded_by_self() {
+        let source = "<div>\n    <p>@self.</p>\n    <p>@self</p>\n    <p>self.</p>\n    <p>other.</p>\n</div>";
+        
+        // Line 1: "    <p>@self.</p>" -> cursor right after dot (col 13)
+        assert!(is_preceded_by_self(source, Position::new(1, 13)));
+        
+        // Line 2: "    <p>@self</p>" -> cursor right after 'self' (col 12)
+        assert!(is_preceded_by_self(source, Position::new(2, 12)));
+
+        // Line 3: "    <p>self.</p>" -> cursor right after dot (col 12)
+        assert!(is_preceded_by_self(source, Position::new(3, 12)));
+
+        // Line 4: "    <p>other.</p>" -> cursor right after dot (col 13)
+        assert!(!is_preceded_by_self(source, Position::new(4, 13)));
+    }
+}
