@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::{
     MarkupContent, MarkupKind, MessageType, OneOf, Range, SemanticTokens, SemanticTokensDelta,
     SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
     SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -122,21 +122,13 @@ impl LanguageServer for Backend {
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
-        let views_path =
-            if let Some(path) = self.get_views_path_for_uri(&params.text_document.uri).await {
-                path
-            } else {
-                error!("view {:?} not found in workspace", params.text_document.uri);
-                return;
-            };
-
         let mut use_directives_with_params = Vec::new();
         for (use_path, use_name) in &use_directives {
-            let use_params = self
-                .state
-                .find_use_params(&views_path.join(use_path))
-                .await
-                .unwrap_or(Vec::new());
+            let use_params = if let Ok(uri) = params.text_document.uri.join(use_path) {
+                self.state.find_use_params(&uri).await.unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             debug!("use params: {use_params:?}");
             use_directives_with_params.push((use_path.to_owned(), use_name.to_owned(), use_params))
         }
@@ -213,21 +205,13 @@ impl LanguageServer for Backend {
             }
         };
 
-        let views_path =
-            if let Some(path) = self.get_views_path_for_uri(&params.text_document.uri).await {
-                path
-            } else {
-                error!("view {:?} not found in workspace", params.text_document.uri);
-                return;
-            };
-
         let mut new_uses_params = Vec::new();
         for (id, use_path) in new_uses {
-            let use_params = self
-                .state
-                .find_use_params(&views_path.join(use_path))
-                .await
-                .unwrap_or_default();
+            let use_params = if let Ok(uri) = params.text_document.uri.join(&use_path) {
+                self.state.find_use_params(&uri).await.unwrap_or_default()
+            } else {
+                Vec::new()
+            };
 
             new_uses_params.push((id, use_params));
         }
@@ -449,11 +433,6 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let views_path = match self.get_views_path_for_uri(uri).await {
-            Some(path) => path,
-            None => return Ok(None),
-        };
-
         let views = self.state.views.read().await;
         if let Some(view) = views.get(&uri.to_string())
             && let Some(target) = NavigationTarget::resolve_at(
@@ -461,20 +440,17 @@ impl LanguageServer for Backend {
                 &view.source,
                 position,
                 &view.use_directives,
-                &views_path,
+                uri,
             )
         {
-            let path = match target {
-                NavigationTarget::Component { target_path, .. } => target_path,
-                NavigationTarget::UseDirective { target_path, .. } => target_path,
+            let target_uri = match target {
+                NavigationTarget::Component { target_uri, .. } => target_uri,
+                NavigationTarget::UseDirective { target_uri, .. } => target_uri,
             };
-
-            if let Ok(uri) = Url::from_file_path(path) {
-                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                    uri,
-                    range: Range::default(),
-                })));
-            }
+            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                uri: target_uri,
+                range: Range::default(),
+            })));
         }
 
         Ok(None)
@@ -484,11 +460,6 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let views_path = match self.get_views_path_for_uri(uri).await {
-            Some(path) => path,
-            None => return Ok(None),
-        };
-
         let views = self.state.views.read().await;
         if let Some(view) = views.get(&uri.to_string())
             && let Some(target) = NavigationTarget::resolve_at(
@@ -496,13 +467,13 @@ impl LanguageServer for Backend {
                 &view.source,
                 position,
                 &view.use_directives,
-                &views_path,
+                uri,
             )
         {
             let (range, markdown) = match target {
                 NavigationTarget::Component {
                     name,
-                    target_path,
+                    target_uri,
                     range,
                     params,
                 } => {
@@ -516,10 +487,10 @@ impl LanguageServer for Backend {
                             .join("\n")
                     };
 
-                    let file_name = target_path
-                        .file_name()
-                        .and_then(|f| f.to_str())
-                        .unwrap_or_default();
+                    let file_name = target_uri
+                        .path_segments()
+                        .and_then(|mut segments| segments.next_back())
+                        .unwrap_or("<unknown>");
 
                     let doc = format!(
                         "### Component `<{name}>`\n\n**File:** `{file_name}`\n\n**Parameters:**\n{params_doc}"
@@ -529,7 +500,7 @@ impl LanguageServer for Backend {
                 }
                 NavigationTarget::UseDirective {
                     path,
-                    target_path: _,
+                    target_uri: _,
                     range,
                 } => {
                     let doc = format!("### Component Import\n\n`{path}`");

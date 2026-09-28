@@ -7,7 +7,6 @@ use crate::app_state::view::View;
 use crate::app_state::workspace::Workspace;
 use crate::backend::tree_extensions::TreeExtensions;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Url};
@@ -111,16 +110,18 @@ impl AppState {
         Self::new(parser, highlights, Self::completion_items(), lang)
     }
 
-    pub async fn find_use_params(&self, use_full_path: &Path) -> Option<Vec<String>> {
+    pub async fn find_use_params(&self, use_full_uri: &Url) -> Option<Vec<String>> {
         {
-            let use_uri_str = Url::from_file_path(use_full_path).ok()?.to_string();
+            let use_uri_str = use_full_uri.to_string();
             let views = self.views.read().await;
             if let Some(view) = views.get(&use_uri_str) {
                 return Some(view.template_params.clone());
             }
         }
 
-        let source_bytes = tokio::fs::read(use_full_path).await.ok()?;
+        let source_bytes = tokio::fs::read(use_full_uri.to_file_path().ok()?)
+            .await
+            .ok()?;
         let source = str::from_utf8(&source_bytes).ok()?;
 
         let mut parser = self.parser.lock().await;
