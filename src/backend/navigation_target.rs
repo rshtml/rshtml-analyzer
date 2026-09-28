@@ -1,20 +1,19 @@
 use crate::backend::Backend;
 use crate::backend::tree_extensions::TreeExtensions;
-use std::path::{Path, PathBuf};
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp::lsp_types::{Position, Range, Url};
 use tree_sitter::Tree;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NavigationTarget {
     Component {
         name: String,
-        target_path: PathBuf,
+        target_uri: Url,
         range: Range,
         params: Vec<String>,
     },
     UseDirective {
         path: String,
-        target_path: PathBuf,
+        target_uri: Url,
         range: Range,
     },
 }
@@ -25,7 +24,7 @@ impl NavigationTarget {
         source: &str,
         position: Position,
         use_directives: &[(String, Option<String>, Vec<String>)],
-        views_path: &Path,
+        view_uri: &Url,
     ) -> Option<Self> {
         let byte_offset = Backend::position_to_byte_offset(source, position);
         let root = tree.root_node();
@@ -47,24 +46,27 @@ impl NavigationTarget {
                 .to_string();
             let range = <Tree as TreeExtensions>::from_range(comp_node.range());
 
-            // Find matching use directive for this component
             for (use_path, use_alias, params) in use_directives {
-                let matches = match use_alias {
-                    Some(alias) => alias == &name,
+                let target_uri = match use_alias {
+                    Some(alias) if alias == &name => view_uri.join(use_path).ok(),
+                    Some(_) => None,
                     None => {
-                        let file_stem = use_path
-                            .trim_end_matches(".rs.html")
-                            .split('/')
-                            .next_back()
-                            .unwrap_or("");
-                        file_stem == name
+                        let uri = view_uri.join(use_path).ok()?;
+
+                        let matches = uri
+                            .path_segments()
+                            .and_then(|mut segments| segments.next_back())
+                            .and_then(|name| name.strip_suffix(".rs.html"))
+                            .is_some_and(|file_stem| file_stem == name);
+
+                        if matches { Some(uri) } else { None }
                     }
                 };
 
-                if matches {
+                if let Some(target_uri) = target_uri {
                     return Some(Self::Component {
                         name,
-                        target_path: views_path.join(use_path),
+                        target_uri,
                         range,
                         params: params.clone(),
                     });
@@ -92,7 +94,7 @@ impl NavigationTarget {
 
             return Some(Self::UseDirective {
                 path: clean_path.to_string(),
-                target_path: views_path.join(clean_path),
+                target_uri: view_uri.join(clean_path).ok()?,
                 range,
             });
         }
@@ -116,32 +118,35 @@ mod tests {
     #[test]
     fn test_resolve_component_target() {
         let source = r#"
-@use "components/button.rs.html" as Button
+    @use "components/button.rs.html" as Button
 
-<Button label="Click" />
-"#;
+    <Button label="Click" />
+    "#;
         let tree = parse_rshtml(source);
         let use_directives = vec![(
             "components/button.rs.html".to_string(),
             Some("Button".to_string()),
             vec!["label".to_string()],
         )];
-        let views_path = PathBuf::from("/project/views");
+        let view_uri = Url::parse("file:///project/views/").unwrap();
 
-        // Position on <Button (line 3, col 2)
-        let pos = Position::new(3, 2);
-        let target = NavigationTarget::resolve_at(&tree, source, pos, &use_directives, &views_path);
+        // Position on <Button (line 3, col 5)
+        let pos = Position::new(3, 5);
+        let target = NavigationTarget::resolve_at(&tree, source, pos, &use_directives, &view_uri);
 
         assert!(target.is_some());
         match target.unwrap() {
             NavigationTarget::Component {
                 name,
-                target_path,
+                target_uri,
                 params,
                 ..
             } => {
                 assert_eq!(name, "Button");
-                assert_eq!(target_path, views_path.join("components/button.rs.html"));
+                assert_eq!(
+                    target_uri,
+                    view_uri.join("components/button.rs.html").unwrap()
+                );
                 assert_eq!(params, vec!["label"]);
             }
             _ => panic!("Expected Component target"),
@@ -153,19 +158,22 @@ mod tests {
         let source = r#"@use "components/button.rs.html" as Button"#;
         let tree = parse_rshtml(source);
         let use_directives = vec![];
-        let views_path = PathBuf::from("/project/views");
+        let view_uri = Url::parse("file:///project/views/").unwrap();
 
         // Position inside "components/button.rs.html" (line 0, col 10)
         let pos = Position::new(0, 10);
-        let target = NavigationTarget::resolve_at(&tree, source, pos, &use_directives, &views_path);
+        let target = NavigationTarget::resolve_at(&tree, source, pos, &use_directives, &view_uri);
 
         assert!(target.is_some());
         match target.unwrap() {
             NavigationTarget::UseDirective {
-                path, target_path, ..
+                path, target_uri, ..
             } => {
                 assert_eq!(path, "components/button.rs.html");
-                assert_eq!(target_path, views_path.join("components/button.rs.html"));
+                assert_eq!(
+                    target_uri,
+                    view_uri.join("components/button.rs.html").unwrap()
+                );
             }
             _ => panic!("Expected UseDirective target"),
         }
