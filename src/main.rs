@@ -1,6 +1,7 @@
 mod app_state;
 mod backend;
 mod consts;
+mod rust_analyzer_client;
 
 use crate::app_state::AppState;
 use crate::backend::Backend;

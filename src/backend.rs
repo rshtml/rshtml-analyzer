@@ -1,11 +1,14 @@
 mod language_server;
 pub mod navigation_target;
+mod rust_analyzer;
 pub mod semantic_tokens_builder;
 mod server_capabilities;
 pub mod syntax_context;
 pub mod tree_extensions;
 
 use crate::app_state::AppState;
+use crate::rust_analyzer_client::RustAnalyzerClient;
+use tokio::sync::OnceCell;
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent};
 use tree_sitter::{Point, Tree};
@@ -13,6 +16,7 @@ use tree_sitter::{Point, Tree};
 pub struct Backend {
     pub client: Client,
     pub state: AppState,
+    ra_client: OnceCell<Option<RustAnalyzerClient>>,
 }
 
 impl Backend {
@@ -20,6 +24,7 @@ impl Backend {
         Self {
             client,
             state: app_state,
+            ra_client: OnceCell::new(),
         }
     }
 

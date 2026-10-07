@@ -1,4 +1,7 @@
+use std::path::{self, PathBuf};
+
 use crate::app_state::view::View;
+use crate::app_state::workspace;
 use crate::backend::Backend;
 use crate::backend::navigation_target::NavigationTarget;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
@@ -34,6 +37,8 @@ impl LanguageServer for Backend {
             .and_then(|folders| folders.first())
             .and_then(|folder| folder.uri.to_file_path().ok());
 
+        debug!("workspace root path: {:?}", workspace_root_path);
+
         if let Some(path) = workspace_root_path {
             debug!("Workspace root path: {:?}", path);
             self.client
@@ -41,10 +46,16 @@ impl LanguageServer for Backend {
                 .await;
 
             let mut workspace = self.state.workspace.write().await;
+            workspace.root = path.to_path_buf();
             workspace.load(&path).unwrap_or_else(|e| {
-                debug!("Workspace couldn't load: {}", e);
+                debug!(
+                    "Workspace couldn't load: {}, operating in single-file mode",
+                    e
+                );
             });
         }
+
+        self.ra_initialize(params.root_uri).await;
 
         debug!("Sending an initialize response.");
         Ok(InitializeResult {
@@ -101,7 +112,8 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let msg = format!("Opened file: {}", &params.text_document.uri);
-        self.client.log_message(MessageType::INFO, msg).await;
+        self.client.log_message(MessageType::INFO, &msg).await;
+        debug!(msg);
 
         let uri_str = params.text_document.uri.to_string();
         let text = params.text_document.text;
@@ -136,11 +148,25 @@ impl LanguageServer for Backend {
         let template_params = tree.find_template_params(&self.state.language, &text);
         debug!("Template params: {:?}", template_params);
 
-        let errors = {
+        let paths_option = if let Ok(path) = params.text_document.uri.to_file_path() {
+            let workspace = self.state.workspace.read().await;
+            Some(workspace.find_root_and_relative_path(&path))
+        } else {
+            debug!("invalid uri: {}", &params.text_document.uri);
+            None
+        };
+
+        let (errors, module_name) = {
             let mut view = View::new(text, tree, params.text_document.version as usize);
             view.use_directives = use_directives_with_params;
             view.create_use_directive_completion_items();
             view.template_params = template_params;
+
+            if let Some((root_path, relative_path)) = &paths_option {
+                view.generate_module_name(relative_path);
+                view.root_path = root_path.to_owned();
+            }
+            let module_name = view.module_name.to_owned();
 
             let mut views = self.state.views.write().await;
 
@@ -148,8 +174,14 @@ impl LanguageServer for Backend {
 
             views.insert(uri_str, view);
 
-            errors
+            (errors, module_name)
         };
+
+        if let Some((root_path, _)) = &paths_option {
+            self.ra_did_open(root_path, module_name)
+                .await
+                .unwrap_or_else(|e| debug!(e));
+        }
 
         self.client
             .publish_diagnostics(
@@ -216,7 +248,7 @@ impl LanguageServer for Backend {
             new_uses_params.push((id, use_params));
         }
 
-        {
+        let paths_option = {
             let mut views = self.state.views.write().await;
             if let Some(view) = views.get_mut(&uri_str) {
                 for (id, use_params) in new_uses_params {
@@ -226,7 +258,22 @@ impl LanguageServer for Backend {
                 }
 
                 view.update_use_directive_completion_items();
+
+                Some((view.root_path.to_owned(), view.module_name.to_owned()))
+            } else {
+                None
             }
+        };
+
+        if let Some((root_path, module_name)) = paths_option {
+            self.ra_did_change(
+                params.text_document.version,
+                root_path,
+                module_name,
+                "".to_string(),
+            )
+            .await
+            .unwrap_or_else(|e| debug!(e));
         }
 
         self.client
