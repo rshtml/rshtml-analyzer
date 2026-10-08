@@ -8,6 +8,7 @@ use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspac
 use crate::backend::syntax_context::SyntaxContext;
 use crate::backend::tree_extensions::TreeExtensions;
 use crate::consts;
+use toml::de;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
@@ -401,20 +402,25 @@ impl LanguageServer for Backend {
         &self,
         params: CompletionParams,
     ) -> jsonrpc::Result<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri;
+        let uri = params.text_document_position.text_document.uri.as_ref();
         let position = params.text_document_position.position;
         let trigger_char = params
             .context
-            .and_then(|ctx| ctx.trigger_character)
+            .as_ref()
+            .and_then(|ctx| ctx.trigger_character.as_ref())
             .and_then(|s| s.chars().next());
 
-        let views = self.state.views.read().await;
+        let (mut completion_items, paths_option) = {
+            let views = self.state.views.read().await;
+            let Some(view) = views.get(&uri.to_string()) else {
+                debug!("Error while getting completion items");
+                return Ok(None);
+            };
 
-        if let Some(view) = views.get(&uri.to_string()) {
             let syntax_context = SyntaxContext::detect(&view.tree, &view.source, position);
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
-            if syntax_context == SyntaxContext::Html {
+            let paths_option = if syntax_context == SyntaxContext::Html {
                 if let Some(tc) = trigger_char {
                     for (item_char, item) in view.completion_items.values() {
                         if *item_char == tc {
@@ -432,6 +438,8 @@ impl LanguageServer for Backend {
 
                     completion_items.extend(self.state.completion_items.clone());
                 }
+
+                None
             } else {
                 match syntax_context {
                     SyntaxContext::ComponentTag => {
@@ -440,6 +448,8 @@ impl LanguageServer for Backend {
                                 completion_items.push(item.clone());
                             }
                         }
+
+                        None
                     }
                     SyntaxContext::ComponentParameter(component_name) => {
                         for (name, params) in view.use_directives_names_and_params().into_iter() {
@@ -458,19 +468,32 @@ impl LanguageServer for Backend {
                                 break;
                             }
                         }
-                    }
-                    _ => {}
-                }
-            }
 
-            return Ok(Some(CompletionResponse::List(CompletionList {
-                is_incomplete: true,
-                items: completion_items,
-            })));
+                        None
+                    }
+                    SyntaxContext::RustCode => {
+                        Some((view.root_path.to_owned(), view.module_name.to_owned()))
+                    }
+                    _ => None,
+                }
+            };
+
+            (completion_items, paths_option)
+        };
+
+        if let Some((root_path, module_name)) = paths_option
+            && let Ok(ra_items) = self
+                .ra_completion(root_path, module_name, params)
+                .await
+                .inspect_err(|e| debug!(e))
+        {
+            completion_items.extend(ra_items)
         }
 
-        debug!("Error while getting completion items");
-        Ok(None)
+        return Ok(Some(CompletionResponse::List(CompletionList {
+            is_incomplete: true,
+            items: completion_items,
+        })));
     }
 
     async fn goto_definition(

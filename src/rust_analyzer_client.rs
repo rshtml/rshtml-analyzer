@@ -275,16 +275,8 @@ impl RustAnalyzerClient {
         .await;
     }
 
-    pub async fn completion(&self, uri: Url, line: u32, character: u32) -> Value {
-        let params = CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-            context: None,
-        };
+    pub async fn completion(&self, uri: Url, mut params: CompletionParams) -> Value {
+        params.text_document_position.text_document.uri = uri;
 
         let response = self
             .send_request(

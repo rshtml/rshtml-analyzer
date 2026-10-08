@@ -3,7 +3,7 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{CompletionItem, CompletionParams, CompletionResponse, Url};
 use tracing::debug;
 
 impl Backend {
@@ -103,6 +103,40 @@ impl Backend {
         }
 
         Ok(())
+    }
+
+    pub async fn ra_completion(
+        &self,
+        root_path: PathBuf,
+        module_name: String,
+        params: CompletionParams,
+    ) -> Result<Vec<CompletionItem>, String> {
+        let rshtml_dir = root_path.join(".rshtml");
+        let module_file_path = rshtml_dir.join(format!("{}.rs", module_name));
+
+        let uri = Url::from_file_path(&module_file_path).map_err(|_| "Couldn't convert uri")?;
+
+        if let Some(Some(ra_client)) = self.ra_client.get() {
+            let completion_value = ra_client.completion(uri, params).await;
+            debug!("RA completion value: {:?}", completion_value);
+            if completion_value.is_null() {
+                return Ok(Vec::new());
+            }
+
+            let response = serde_json::from_value::<CompletionResponse>(completion_value)
+                .map_err(|e| format!("RA Completion JSON parse error: {}", e))?;
+
+            match response {
+                CompletionResponse::Array(items) => {
+                    return Ok(items);
+                }
+                CompletionResponse::List(completion_list) => {
+                    return Ok(completion_list.items);
+                }
+            }
+        }
+
+        Ok(Vec::new())
     }
 
     async fn create_module_file(
