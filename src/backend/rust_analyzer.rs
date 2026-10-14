@@ -1,8 +1,12 @@
-use crate::{backend::Backend, rust_analyzer_client::RustAnalyzerClient};
-use std::{
-    io,
-    path::{Path, PathBuf},
+use crate::{
+    backend::{
+        Backend,
+        extract::{Extract, Snippet},
+    },
+    rust_analyzer_client::RustAnalyzerClient,
 };
+use std::path::Path;
+use tokio::fs;
 use tower_lsp::lsp_types::{CompletionItem, CompletionParams, CompletionResponse, Url};
 use tracing::debug;
 
@@ -16,43 +20,33 @@ impl Backend {
         let _ = self.ra_client.set(ra_option);
     }
 
-    pub async fn ra_did_open(&self, root_path: &Path, module_name: String) -> Result<(), String> {
-        let module_file_path = self
-            .create_module_file(root_path, module_name)
-            .await
-            .map_err(|e| e.to_string())?;
+    pub async fn ra_did_open(
+        &self,
+        module_file_uri: &Url,
+        module_file_path: &Path,
+    ) -> Result<(), String> {
+        // TODO: Based on the `use` directives of the component, those that are active will be added to the source as modules.
+        // When a component is opened, the system will check if it appears as a `use` directive in any of the currently open components;
+        // if so, it will update the source. Additions can be made at the very bottom.
 
-        let module_uri =
-            Url::from_file_path(module_file_path).map_err(|_| "Coundn't convert uri")?;
+        let module_text = fs::read_to_string(&module_file_path).await.map_err(|e| {
+            format!(
+                "Failed to read file at '{}': {}",
+                module_file_path.display(),
+                e
+            )
+        })?;
+
+        // assert_eq!(extracted_source.as_bytes(), module_text.as_bytes());
 
         if let Some(Some(ra_client)) = self.ra_client.get() {
-            let text = "#[allow(non_snake_case)]
-            pub mod Card_f62e0dcfda318b70;
+            // println!("text: {}", module_text);
+            ra_client
+                .did_open(module_file_uri.to_owned(), module_text)
+                .await;
 
-            use super::*;
-
-            impl HomePage {
-                pub fn __home(&self) {
-                    if self.is_ok {
-                        let x = \"hello home\";
-                        println!(\"okk\");
-
-                        self.__Card();
-                    }
-                }
-            }
-";
-            let module_names: Vec<String> = {
-                let views = self.state.views.read().await;
-                views
-                    .values()
-                    .map(|view| view.module_name.clone())
-                    .collect()
-            };
-
-            println!("module names: {:?}", module_names);
-            ra_client.update_rustflags(&module_names).await;
-            ra_client.did_open(module_uri, text.to_owned()).await;
+            let response = ra_client.analyzer_status(module_file_uri.clone()).await;
+            println!("{}", response);
         }
 
         Ok(())
@@ -61,45 +55,54 @@ impl Backend {
     pub async fn ra_did_change(
         &self,
         version: i32,
-        root_path: PathBuf,
-        module_name: String,
-        new_text: String,
+        uri: Url,
+        cleaned_source: Vec<u8>,
+        snippets: Vec<Snippet>,
     ) -> Result<(), String> {
         if let Some(Some(ra_client)) = self.ra_client.get() {
-            let rshtml_dir = root_path.join(".rshtml");
-            let module_file_path = rshtml_dir.join(format!("{}.rs", module_name));
-
-            let uri = Url::from_file_path(&module_file_path).map_err(|_| "Couldn't convert uri")?;
-
-            let new_text = "#[allow(non_snake_case)]
-            pub mod Card_f62e0dcfda318b70;
-
-            use super::*;
-
-            impl HomePage {
-                pub fn __home(&self) {
-                    if self.is_ok {
-                        let x = \"hello home\";
-                        println!(\"okk\");
-                        let y = ;
-
-                        self.__Card();
+            let fn_params = snippets
+                .iter()
+                .filter_map(|s| match s {
+                    Snippet::Param { name: (_, n), ty } => {
+                        let clean_name = n.strip_prefix("self ").unwrap_or(n).trim();
+                        let clean_ty = match ty {
+                            Some((_, t)) => t.as_str().trim(),
+                            None => "impl ::rshtml::View",
+                        };
+                        Some(format!("{}: {}", clean_name, clean_ty))
                     }
-                }
-            }
-"
-            .to_string();
-            ra_client.did_change(uri.clone(), version, new_text).await;
+                    _ => None,
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
 
-            debug!(
-                "RA did change sended,uri: {} version: {}, module file path: {:?}",
-                uri, version, module_file_path
+            let mut extract = Extract::new(cleaned_source);
+            for snippet in snippets {
+                extract.push(snippet);
+            }
+            extract.extract();
+
+            let extract_source = format!(
+                "fn render(child_content: impl ::rshtml::View, {1}) -> ::std::fmt::Result {{ {2} {0}",
+                "Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
+                fn_params,
+                String::from_utf8_lossy(&extract.source)
             );
 
-            // let status = ra_client.analyzer_status(uri.clone()).await;
-            // if let Some(s) = status.as_str() {
-            //     println!("{}", s);
-            // }
+            println!(
+                "(DID CHANGE) Uri: {}, Extracted Source: {}",
+                uri.clone(),
+                extract_source
+            );
+
+            ra_client
+                .did_change(uri.clone(), version, extract_source)
+                .await;
+
+            debug!("RA did change sended, uri: {} version: {}", uri, version);
+
+            // let response = ra_client.analyzer_status(uri.clone()).await;
+            // println!("{}", response);
         }
 
         Ok(())
@@ -107,17 +110,14 @@ impl Backend {
 
     pub async fn ra_completion(
         &self,
-        root_path: PathBuf,
-        module_name: String,
-        params: CompletionParams,
+        uri: Url,
+        mut params: CompletionParams,
     ) -> Result<Vec<CompletionItem>, String> {
-        let rshtml_dir = root_path.join(".rshtml");
-        let module_file_path = rshtml_dir.join(format!("{}.rs", module_name));
-
-        let uri = Url::from_file_path(&module_file_path).map_err(|_| "Couldn't convert uri")?;
+        params.text_document_position.text_document.uri = uri.to_owned();
+        debug!("COMPLATION uri: {uri:?}, \n\nparams: {params:?}");
 
         if let Some(Some(ra_client)) = self.ra_client.get() {
-            let completion_value = ra_client.completion(uri, params).await;
+            let completion_value = ra_client.completion(params).await;
             debug!("RA completion value: {:?}", completion_value);
             if completion_value.is_null() {
                 return Ok(Vec::new());
@@ -139,21 +139,21 @@ impl Backend {
         Ok(Vec::new())
     }
 
-    async fn create_module_file(
-        &self,
-        root_path: &Path,
-        module_name: String,
-    ) -> io::Result<PathBuf> {
-        let rshtml_dir = root_path.join(".rshtml");
-        let module_file_path = rshtml_dir.join(format!("{}.rs", module_name));
+    // async fn create_module_file(
+    //     &self,
+    //     root_path: &Path,
+    //     module_name: String,
+    // ) -> io::Result<PathBuf> {
+    //     let rshtml_dir = root_path.join(".rshtml");
+    //     let module_file_path = rshtml_dir.join(format!("{}.rs", module_name));
 
-        tokio::fs::create_dir_all(&rshtml_dir).await?;
+    //     tokio::fs::create_dir_all(&rshtml_dir).await?;
 
-        if !module_file_path.exists() {
-            tokio::fs::write(&module_file_path, "").await?;
-            debug!("module file path created: {module_file_path:?}");
-        }
+    //     if !module_file_path.exists() {
+    //         tokio::fs::write(&module_file_path, "").await?;
+    //         debug!("module file path created: {module_file_path:?}");
+    //     }
 
-        Ok(module_file_path)
-    }
+    //     Ok(module_file_path)
+    // }
 }

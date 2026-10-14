@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
-use tokio::sync::{Mutex, RwLock, oneshot};
+use tokio::sync::{Mutex, oneshot};
 use tower_lsp::lsp_types::{
     ClientCapabilities, CompletionParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
     InitializeParams, Position, Range, TextDocumentClientCapabilities,
@@ -18,7 +18,6 @@ pub struct RustAnalyzerClient {
     stdin: Arc<Mutex<ChildStdin>>,
     next_id: AtomicU64,
     pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
-    current_config: Arc<RwLock<Value>>,
 }
 
 impl RustAnalyzerClient {
@@ -37,12 +36,6 @@ impl RustAnalyzerClient {
 
         let pending_requests = Arc::new(Mutex::new(HashMap::<u64, oneshot::Sender<Value>>::new()));
         let pending_requests_clone = pending_requests.clone();
-
-        let current_config = Arc::new(RwLock::new(serde_json::json!({
-            "cargo": { "extraEnv": { "RUSTFLAGS": "" }, "cfgs": [] },
-            "rust": { "analyzerTargetDir": true }
-        })));
-        let config_for_reader = current_config.clone();
 
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
@@ -91,7 +84,9 @@ impl RustAnalyzerClient {
                                         .as_array()
                                         .map(|a| a.len())
                                         .unwrap_or(1);
-                                    let cfg = config_for_reader.read().await.clone();
+                                    let cfg = json!({
+                                        "rust": { "analyzerTargetDir": true }
+                                    });
                                     Value::Array(vec![cfg; n])
                                 } else {
                                     debug!("RA request received: {}", method);
@@ -146,7 +141,6 @@ impl RustAnalyzerClient {
             stdin,
             next_id: AtomicU64::new(1),
             pending_requests,
-            current_config,
         })
     }
 
@@ -199,7 +193,10 @@ impl RustAnalyzerClient {
     }
 
     pub async fn initialize(&self, root_uri: Option<Url>) -> Value {
-        let initialization_options = self.current_config.read().await.clone();
+        let initialization_options = json!({
+            // "cargo": { "extraEnv": { "RUSTFLAGS": "--cfg rshtml" }, "cfgs": ["rshtml"] },
+            "rust": { "analyzerTargetDir": true }
+        });
 
         let mut client_capabilities = ClientCapabilities::default();
         client_capabilities.text_document = Some(TextDocumentClientCapabilities {
@@ -254,8 +251,11 @@ impl RustAnalyzerClient {
             serde_json::to_value(params).unwrap(),
         )
         .await;
-
         debug!("RA open file request sent.");
+
+        self.send_request("rust-analyzer/reloadWorkspace", json!(null))
+            .await;
+        debug!("RA workspace reload request sent");
     }
 
     pub async fn did_change(&self, uri: Url, version: i32, new_text: String) {
@@ -275,9 +275,7 @@ impl RustAnalyzerClient {
         .await;
     }
 
-    pub async fn completion(&self, uri: Url, mut params: CompletionParams) -> Value {
-        params.text_document_position.text_document.uri = uri;
-
+    pub async fn completion(&self, params: CompletionParams) -> Value {
         let response = self
             .send_request(
                 "textDocument/completion",
@@ -288,42 +286,57 @@ impl RustAnalyzerClient {
         response.get("result").cloned().unwrap_or(Value::Null)
     }
 
-    pub async fn update_rustflags<S: AsRef<str>>(&self, active_modules: &[S]) {
-        let mut rustflags = String::new();
-        let mut ra_cfgs: Vec<String> = Vec::new();
+    pub async fn analyzer_status(&self, uri: Url) -> String {
+        let params = serde_json::json!({ "textDocument": { "uri": uri } });
 
-        for module in active_modules {
-            let mod_str = module.as_ref();
-            rustflags.push_str(&format!("--cfg rshtml=\"{}\" ", mod_str));
-            ra_cfgs.push(format!("rshtml=\"{}\"", mod_str));
-        }
-        let rustflags = rustflags.trim().to_string();
-
-        debug!("RA RUSTFLAGS: {}", rustflags);
-        debug!("RA CFGS: {:?}", ra_cfgs);
-
-        let new_config = json!({
-            "cargo": {
-                "extraEnv": { "RUSTFLAGS": rustflags },
-                "cfgs": ra_cfgs
-            }
-        });
-
-        {
-            let mut config_lock = self.current_config.write().await;
-            *config_lock = new_config.clone();
-        }
-
-        let params = json!({
-            "settings": new_config
-        });
-
-        self.send_notification("workspace/didChangeConfiguration", params.to_owned())
+        let response = self
+            .send_request("rust-analyzer/analyzerStatus", params)
             .await;
-        debug!("RA configuration updated with new RUSTFLAGS: {params}");
 
-        self.send_request("rust-analyzer/reloadWorkspace", json!(null))
-            .await;
-        debug!("RA workspace reload request sent");
+        response
+            .get("result")
+            .unwrap_or(&response)
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
     }
+
+    // pub async fn update_rustflags<S: AsRef<str>>(&self, active_modules: &[S]) {
+    //     let mut rustflags = String::new();
+    //     let mut ra_cfgs: Vec<String> = Vec::new();
+
+    //     for module in active_modules {
+    //         let mod_str = module.as_ref();
+    //         rustflags.push_str(&format!("--cfg rshtml=\"{}\" ", mod_str));
+    //         ra_cfgs.push(format!("rshtml=\"{}\"", mod_str));
+    //     }
+    //     let rustflags = rustflags.trim().to_string();
+
+    //     debug!("RA RUSTFLAGS: {}", rustflags);
+    //     debug!("RA CFGS: {:?}", ra_cfgs);
+
+    //     let new_config = json!({
+    //         "cargo": {
+    //             "extraEnv": { "RUSTFLAGS": rustflags },
+    //             "cfgs": ra_cfgs
+    //         }
+    //     });
+
+    //     {
+    //         let mut config_lock = self.current_config.write().await;
+    //         *config_lock = new_config.clone();
+    //     }
+
+    //     let params = json!({
+    //         "settings": new_config
+    //     });
+
+    //     self.send_notification("workspace/didChangeConfiguration", params.to_owned())
+    //         .await;
+    //     debug!("RA configuration updated with new RUSTFLAGS: {params}");
+
+    //     self.send_request("rust-analyzer/reloadWorkspace", json!(null))
+    //         .await;
+    //     debug!("RA workspace reload request sent");
+    // }
 }

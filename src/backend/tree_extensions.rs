@@ -3,6 +3,8 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 use tracing::error;
 use tree_sitter::{Language, Query, QueryCursor, QueryMatch, Range, StreamingIterator};
 
+use crate::backend::extract::Snippet;
+
 pub trait TreeExtensions {
     const STRING_TRIMS: &'_ [char] = &[' ', '\'', '"'];
 
@@ -21,6 +23,8 @@ pub trait TreeExtensions {
     fn find_template_params(&self, language: &Language, source: &str) -> Vec<String>;
 
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic>;
+
+    fn extract_snippets(&self, language: &Language, source: &str) -> Vec<Snippet>;
 
     fn from_range(range: Range) -> lsp_types::Range {
         let start_point = range.start_point;
@@ -151,6 +155,73 @@ impl TreeExtensions for tree_sitter::Tree {
             error!("Error during error query: {}", err);
             vec![]
         })
+    }
+
+    fn extract_snippets(&self, language: &Language, source: &str) -> Vec<Snippet> {
+        let query_str = "[
+                    (param (param_name) @param_name (rust_text)? @param_rust_text)
+                    (rust_text) @rust_text
+                    (if_stmt [(open_brace) (close_brace)] @brace)
+                    (for_stmt [(open_brace) (close_brace)] @brace)
+                    (while_stmt [(open_brace) (close_brace)] @brace)
+                    (child_content_) @child_content
+                    (continue_) @continue
+                    (break_) @break
+                ]";
+
+        let snippets = self
+            .find(language, query_str, source, |x| {
+                // let capture = x.captures.first()?;
+                // let s = capture.node.utf8_text(source.as_bytes()).ok()?.to_string();
+                // let snippet = Snippet::Block(capture.node.byte_range(), s);
+
+                // Some(snippet)
+
+                let first_cap = x.captures.first()?;
+                let node = first_cap.node;
+                let range = node.byte_range();
+                let text = node.utf8_text(source.as_bytes()).ok()?.to_string();
+
+                match node.kind() {
+                    // 1. Parametreler
+                    "param_name" => {
+                        let ty = x.captures.get(1).and_then(|rt_cap| {
+                            let rt_node = rt_cap.node;
+                            let rt_text = rt_node.utf8_text(source.as_bytes()).ok()?.to_string();
+                            Some((rt_node.byte_range(), rt_text))
+                        });
+
+                        Some(Snippet::Param {
+                            name: (range, text),
+                            ty,
+                        })
+                    }
+
+                    // 2. Doğrudan Expr olanlar
+                    "child_content_" | "continue_" | "break_" => Some(Snippet::Expr(range, text)),
+
+                    // 3. Ebeveynine göre ayrılan rust_text'ler
+                    "rust_text" => {
+                        let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+
+                        match parent_kind {
+                            "param" => None,
+                            "rust_expr_paren" => Some(Snippet::Expr(range, text)),
+                            "rust_expr_simple" => Some(Snippet::ExprSimple(range, text)),
+                            _ => Some(Snippet::Statement(range, text)),
+                        }
+                    }
+
+                    // 4. open_brace ve close_brace doğrudan buradan Statement olarak döner
+                    _ => Some(Snippet::Statement(range, text)),
+                }
+            })
+            .unwrap_or_else(|x| {
+                error!("Error during extract query: {}", x);
+                vec![]
+            });
+
+        snippets
     }
 }
 

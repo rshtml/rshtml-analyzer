@@ -1,8 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens};
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url,
+};
 use tree_sitter::Tree;
 
 pub struct View {
@@ -13,14 +15,13 @@ pub struct View {
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
     pub semantic_tokens_version: u64,
-    pub root_path: PathBuf,
-    pub module_name: String,
+    pub extract_file_uri: Option<Url>,
 
     pub version: usize,
 }
 
 impl View {
-    pub fn new(source: String, tree: Tree, version: usize) -> Self {
+    pub fn new(source: String, tree: Tree, version: usize, extract_file_uri: Option<Url>) -> Self {
         Self {
             source,
             tree,
@@ -29,8 +30,7 @@ impl View {
             completion_items: HashMap::new(),
             semantic_tokens: SemanticTokens::default(),
             semantic_tokens_version: 0,
-            root_path: PathBuf::new(),
-            module_name: String::new(),
+            extract_file_uri,
             version,
         }
     }
@@ -137,23 +137,6 @@ impl View {
                     Self::use_directive_completion_item(use_name, &params)
                 });
         }
-    }
-
-    pub fn generate_module_name(&mut self, relative_path: &Path) {
-        let filename = relative_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        let component_name = filename.strip_suffix(".rs.html").unwrap_or(filename);
-
-        let path_bytes = relative_path.as_os_str().as_encoded_bytes();
-
-        let mut hash: u64 = 5381;
-        for c in path_bytes {
-            hash = ((hash << 5).wrapping_add(hash)).wrapping_add(*c as u64);
-        }
-
-        self.module_name = format!("{}_{:x}", component_name, hash);
     }
 }
 

@@ -1196,7 +1196,6 @@ checksum = "c4013970217383f67b18aef68f6fb2e8d409bc5755227092d32efb0422ba24b8"
 [[package]]
 name = "tree-sitter-rshtml"
 version = "0.1.0"
-source = "git+https://github.com/rshtml/tree-sitter-rshtml.git?tag=v0.1.6#79f93ccba929cc7bbfe00c25184bba048290feef"
 dependencies = [
  "cc",
  "tree-sitter-language",

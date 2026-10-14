@@ -1,14 +1,10 @@
-use std::path::{self, PathBuf};
-
 use crate::app_state::view::View;
-use crate::app_state::workspace;
 use crate::backend::Backend;
 use crate::backend::navigation_target::NavigationTarget;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::syntax_context::SyntaxContext;
 use crate::backend::tree_extensions::TreeExtensions;
 use crate::consts;
-use toml::de;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
@@ -19,7 +15,7 @@ use tower_lsp::lsp_types::{
     MarkupContent, MarkupKind, MessageType, OneOf, Range, SemanticTokens, SemanticTokensDelta,
     SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
     SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -132,6 +128,50 @@ impl LanguageServer for Backend {
             }
         };
 
+        // extract ---------
+        // let snippets = tree.extract_snippets(&self.state.language, &text);
+        // let fn_params = snippets
+        //     .iter()
+        //     .filter_map(|s| match s {
+        //         Snippet::Param { name: (_, n), ty } => {
+        //             let clean_name = n.strip_prefix("self ").unwrap_or(n).trim();
+        //             let clean_ty = match ty {
+        //                 Some((_, t)) => t.as_str().trim(),
+        //                 None => "impl ::rshtml::View",
+        //             };
+        //             Some(format!("{}: {}", clean_name, clean_ty))
+        //         }
+        //         _ => None,
+        //     })
+        //     .collect::<Vec<String>>()
+        //     .join(", ");
+
+        // let cleaned_source = text
+        //     .as_bytes()
+        //     .iter()
+        //     .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
+        //     .collect::<Vec<u8>>();
+
+        // let mut extract = Extract::new(cleaned_source);
+        // for snippet in snippets {
+        //     extract.push(snippet);
+        // }
+        // extract.extract();
+
+        // let extract_source = format!(
+        //     "fn render(child_content: impl ::rshtml::View, {1}) -> ::std::fmt::Result {{ {2} {0}",
+        //     "Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
+        //     fn_params,
+        //     String::from_utf8_lossy(&extract.source)
+        // );
+
+        // println!("Extracted Source: {}", extract_source);
+        // let header_offset = format!(
+        //     "fn render(child_content: impl ::rshtml::View, {}) -> ::std::fmt::Result {{ ",
+        //     fn_params
+        // ).chars().count();
+        // end extract ---------
+
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
@@ -149,25 +189,42 @@ impl LanguageServer for Backend {
         let template_params = tree.find_template_params(&self.state.language, &text);
         debug!("Template params: {:?}", template_params);
 
-        let paths_option = if let Ok(path) = params.text_document.uri.to_file_path() {
-            let workspace = self.state.workspace.read().await;
-            Some(workspace.find_root_and_relative_path(&path))
-        } else {
-            debug!("invalid uri: {}", &params.text_document.uri);
-            None
-        };
+        let module_file = async {
+            let path = params
+                .text_document
+                .uri
+                .to_file_path()
+                .map_err(|_| {
+                    debug!("invalid uri: {}", &params.text_document.uri);
+                })
+                .ok()?;
 
-        let (errors, module_name) = {
-            let mut view = View::new(text, tree, params.text_document.version as usize);
+            let workspace = self.state.workspace.read().await;
+            let (root_path, relative_path) = workspace.find_root_and_relative_path(&path);
+
+            let module_file_path = Self::generate_module_path(&root_path, &relative_path)
+                .await
+                .map_err(|e| debug!("generate_module_path error: {}", e))
+                .ok()?;
+
+            let module_file_uri = Url::from_file_path(&module_file_path)
+                .map_err(|_| debug!("Couldn't convert file to uri: {:?}", module_file_path))
+                .ok()?;
+
+            Some((module_file_uri, module_file_path))
+        }
+        .await;
+
+        let errors = {
+            let mut view = View::new(
+                text.to_owned(),
+                tree.to_owned(),
+                params.text_document.version as usize,
+                module_file.as_ref().map(|x| x.0.clone()),
+            );
             view.use_directives = use_directives_with_params;
             view.create_use_directive_completion_items();
             view.template_params = template_params;
-
-            if let Some((root_path, relative_path)) = &paths_option {
-                view.generate_module_name(relative_path);
-                view.root_path = root_path.to_owned();
-            }
-            let module_name = view.module_name.to_owned();
 
             let mut views = self.state.views.write().await;
 
@@ -175,11 +232,11 @@ impl LanguageServer for Backend {
 
             views.insert(uri_str, view);
 
-            (errors, module_name)
+            errors
         };
 
-        if let Some((root_path, _)) = &paths_option {
-            self.ra_did_open(root_path, module_name)
+        if let Some((module_file_uri, module_file_path)) = &module_file {
+            self.ra_did_open(module_file_uri, module_file_path)
                 .await
                 .unwrap_or_else(|e| debug!(e));
         }
@@ -249,7 +306,7 @@ impl LanguageServer for Backend {
             new_uses_params.push((id, use_params));
         }
 
-        let paths_option = {
+        let extract_file = {
             let mut views = self.state.views.write().await;
             if let Some(view) = views.get_mut(&uri_str) {
                 for (id, use_params) in new_uses_params {
@@ -260,18 +317,29 @@ impl LanguageServer for Backend {
 
                 view.update_use_directive_completion_items();
 
-                Some((view.root_path.to_owned(), view.module_name.to_owned()))
+                let snippets = view
+                    .tree
+                    .extract_snippets(&self.state.language, &view.source);
+
+                let cleaned_source = view
+                    .source
+                    .as_bytes()
+                    .iter()
+                    .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
+                    .collect::<Vec<u8>>();
+
+                Some((view.extract_file_uri.to_owned(), snippets, cleaned_source))
             } else {
                 None
             }
         };
 
-        if let Some((root_path, module_name)) = paths_option {
+        if let Some((Some(extract_file_uri), snippets, cleaned_source)) = extract_file {
             self.ra_did_change(
                 params.text_document.version,
-                root_path,
-                module_name,
-                "".to_string(),
+                extract_file_uri,
+                cleaned_source,
+                snippets,
             )
             .await
             .unwrap_or_else(|e| debug!(e));
@@ -410,7 +478,7 @@ impl LanguageServer for Backend {
             .and_then(|ctx| ctx.trigger_character.as_ref())
             .and_then(|s| s.chars().next());
 
-        let (mut completion_items, paths_option) = {
+        let (mut completion_items, extract_file_uri) = {
             let views = self.state.views.read().await;
             let Some(view) = views.get(&uri.to_string()) else {
                 debug!("Error while getting completion items");
@@ -420,7 +488,7 @@ impl LanguageServer for Backend {
             let syntax_context = SyntaxContext::detect(&view.tree, &view.source, position);
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
-            let paths_option = if syntax_context == SyntaxContext::Html {
+            let extract_file_uri: Option<Url> = if syntax_context == SyntaxContext::Html {
                 if let Some(tc) = trigger_char {
                     for (item_char, item) in view.completion_items.values() {
                         if *item_char == tc {
@@ -471,23 +539,26 @@ impl LanguageServer for Backend {
 
                         None
                     }
-                    SyntaxContext::RustCode => {
-                        Some((view.root_path.to_owned(), view.module_name.to_owned()))
-                    }
+                    SyntaxContext::RustCode => view.extract_file_uri.to_owned(),
                     _ => None,
                 }
             };
 
-            (completion_items, paths_option)
+            debug!("Extract File Uri: {:?}", extract_file_uri);
+            (completion_items, extract_file_uri)
         };
 
-        if let Some((root_path, module_name)) = paths_option
+        if let Some(extract_file_uri) = extract_file_uri
             && let Ok(ra_items) = self
-                .ra_completion(root_path, module_name, params)
+                .ra_completion(extract_file_uri, params.clone())
                 .await
                 .inspect_err(|e| debug!(e))
         {
-            completion_items.extend(ra_items)
+            debug!("RA complation items: {:?}", ra_items);
+            completion_items.extend(ra_items);
+            debug!("RA complation extend work");
+        } else {
+            debug!("RA complation NOT work");
         }
 
         return Ok(Some(CompletionResponse::List(CompletionList {
