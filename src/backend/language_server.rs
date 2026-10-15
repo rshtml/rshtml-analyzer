@@ -202,48 +202,13 @@ impl LanguageServer for Backend {
 
             let errors = view.tree.find_error(&self.state.language, &view.source);
 
-            // let snippets = view
-            //     .tree
-            //     .extract_snippets(&self.state.language, &view.source);
-
-            // if let Some((_, module_file_path)) = &module_file {
-            //     let extract_source = Self::extract_source(snippets, &view.source);
-            //     let module_text = tokio::fs::read_to_string(&module_file_path)
-            //         .await
-            //         .map_err(|e| {
-            //             format!(
-            //                 "Failed to read file at '{}': {}",
-            //                 module_file_path.display(),
-            //                 e
-            //             )
-            //         })
-            //         .unwrap();
-
-            //     if extract_source != module_text {
-            //         debug!("(DID OPEN) SOURCES MISMATCH! Analyzing differences...");
-
-            //         let extracted_lines: Vec<&str> = extract_source.lines().collect();
-            //         let module_lines: Vec<&str> = module_text.lines().collect();
-
-            //         let max_lines = std::cmp::max(extracted_lines.len(), module_lines.len());
-
-            //         for i in 0..max_lines {
-            //             let e_line = extracted_lines.get(i).unwrap_or(&"<EOF>");
-            //             let m_line = module_lines.get(i).unwrap_or(&"<EOF>");
-
-            //             if e_line != m_line {
-            //                 debug!("Difference found at Line {}:", i + 1);
-            //                 debug!("  Extracted (RAM): {:?}", e_line);
-            //                 debug!("  Module (Disk)  : {:?}", m_line);
-            //                 continue;
-            //             }
-            //         }
-            //     } else {
-            //         debug!("(DID OPEN) sources matched perfectly");
-            //     }
-            //     // assert_eq!(extract_source.as_bytes(), module_text.as_bytes());
-            //     // debug!("(DID OPEN) sources matched");
-            // }
+            // Self::debug_check_source_mismatch(
+            //     &extract_file,
+            //     view.tree
+            //         .extract_snippets(&self.state.language, &view.source),
+            //     &view.source,
+            // )
+            // .await;
 
             views.insert(uri_str, view);
 
@@ -268,6 +233,9 @@ impl LanguageServer for Backend {
             ra_client
                 .did_open(extract_file_uri.to_owned(), extract_text)
                 .await;
+
+            // let status = ra_client.analyzer_status(extract_file_uri).await;
+            // debug!("(DEBUG STATUS) {status}");
 
             Some(())
         }

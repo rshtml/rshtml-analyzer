@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_use_directives_names_and_params() {
-        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        let mut view = View::new("".to_string(), dummy_tree(), 1, None);
         view.use_directives = vec![
             (
                 "components/button.rs.html".to_string(),
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_sync_use_directives() {
-        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        let mut view = View::new("".to_string(), dummy_tree(), 1, None);
 
         // Initial sync
         let new_uses = view.sync_use_directives(vec![(
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_completion_items_generation() {
-        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        let mut view = View::new("".to_string(), dummy_tree(), 1, None);
         view.use_directives = vec![(
             "components/button.rs.html".to_string(),
             Some("Button".to_string()),

@@ -15,7 +15,8 @@ use crate::rust_analyzer_client::RustAnalyzerClient;
 use tokio::fs;
 use tokio::sync::OnceCell;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent};
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
+use tracing::debug;
 use tree_sitter::{Point, Tree};
 
 pub struct Backend {
@@ -199,6 +200,41 @@ impl Backend {
         );
 
         extract_source
+    }
+
+    #[allow(dead_code)]
+    async fn debug_check_source_mismatch(
+        extract_file: &Option<(Url, PathBuf)>,
+        snippets: Vec<Snippet>,
+        source: &str,
+    ) {
+        if let Some((_, extract_file_path)) = extract_file {
+            let extract_source = Self::extract_source(snippets, source);
+            let Ok(extract_text) = tokio::fs::read_to_string(&extract_file_path).await else {
+                return;
+            };
+
+            if extract_source != extract_text {
+                debug!("(DEBUG CHECK) SOURCES MISMATCH! Analyzing differences...");
+                let extracted_lines: Vec<&str> = extract_source.lines().collect();
+                let extract_lines: Vec<&str> = extract_text.lines().collect();
+                let max_lines = std::cmp::max(extracted_lines.len(), extract_lines.len());
+
+                for i in 0..max_lines {
+                    let e_line = extracted_lines.get(i).unwrap_or(&"<EOF>");
+                    let m_line = extract_lines.get(i).unwrap_or(&"<EOF>");
+
+                    if e_line != m_line {
+                        debug!("Difference found at Line {}:", i + 1);
+                        debug!("  Extract (RAM): {:?}", e_line);
+                        debug!("  Extract (Disk)  : {:?}", m_line);
+                        continue;
+                    }
+                }
+            } else {
+                debug!("(DEBUG CHECK) sources matched perfectly");
+            }
+        }
     }
 }
 

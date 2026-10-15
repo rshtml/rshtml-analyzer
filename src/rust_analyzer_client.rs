@@ -289,7 +289,8 @@ impl RustAnalyzerClient {
         response.get("result").cloned().unwrap_or(Value::Null)
     }
 
-    pub async fn _analyzer_status(&self, uri: Url) -> String {
+    #[allow(dead_code)]
+    pub async fn analyzer_status(&self, uri: Url) -> String {
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
 
         let response = self
