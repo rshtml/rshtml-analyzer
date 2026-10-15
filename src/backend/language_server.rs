@@ -10,13 +10,14 @@ use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
     CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, InsertTextFormat, Location,
-    MarkupContent, MarkupKind, MessageType, OneOf, Range, SemanticTokens, SemanticTokensDelta,
-    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
-    SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType, OneOf, Range,
+    SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
+    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
+    SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentIdentifier,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -53,7 +54,7 @@ impl LanguageServer for Backend {
             });
         }
 
-        let ra_option = RustAnalyzerClient::new().await;
+        let ra_option = RustAnalyzerClient::new(self.client.clone()).await;
         if let Some(ra) = &ra_option {
             ra.initialize(params.root_uri).await;
             ra.initialized().await;
@@ -230,9 +231,14 @@ impl LanguageServer for Backend {
                 .ok()?;
 
             let ra_client = self.ra_client.get()?.as_ref()?;
+
             ra_client
-                .did_open(extract_file_uri.to_owned(), extract_text)
-                .await;
+                .uri_map
+                .lock()
+                .await
+                .insert(extract_file_uri.clone(), params.text_document.uri.clone());
+
+            ra_client.did_open(extract_file_uri, extract_text).await;
 
             // let status = ra_client.analyzer_status(extract_file_uri).await;
             // debug!("(DEBUG STATUS) {status}");
@@ -370,6 +376,44 @@ impl LanguageServer for Backend {
 
         let mut views = self.state.views.write().await;
         views.remove(&uri_str);
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        debug!(
+            "(DID SAVE) triggered for file: {}",
+            params.text_document.uri
+        );
+
+        let _ = async {
+            let extract_file_uri = {
+                let views = self.state.views.read().await;
+                let Some(view) = views.get(&params.text_document.uri.to_string()) else {
+                    debug!("(DID SAVE) error while getting completion items");
+                    return None;
+                };
+
+                let Some(extract_file_uri) = &view.extract_file_uri else {
+                    debug!("(DID SAVE) error while getting extract file uri");
+                    return None;
+                };
+
+                extract_file_uri.to_owned()
+            };
+
+            let params = DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier {
+                    uri: extract_file_uri,
+                },
+                text: None,
+            };
+
+            let ra_client = self.ra_client.get()?.as_ref()?;
+            ra_client.did_save(params).await;
+            debug!("(DID SAVE) RA save request sent");
+
+            Some(())
+        }
+        .await;
     }
 
     async fn semantic_tokens_full(

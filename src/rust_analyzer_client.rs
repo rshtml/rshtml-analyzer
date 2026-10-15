@@ -6,11 +6,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
+use tower_lsp::Client;
 use tower_lsp::lsp_types::{
     ClientCapabilities, CompletionClientCapabilities, CompletionItemCapability, CompletionParams,
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams,
-    TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentItem,
-    TextDocumentSyncClientCapabilities, Url, VersionedTextDocumentIdentifier,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    InitializeParams, PublishDiagnosticsParams, TextDocumentClientCapabilities,
+    TextDocumentContentChangeEvent, TextDocumentItem, TextDocumentSyncClientCapabilities, Url,
+    VersionedTextDocumentIdentifier,
 };
 use tracing::{debug, error};
 
@@ -18,10 +20,11 @@ pub struct RustAnalyzerClient {
     stdin: Arc<Mutex<ChildStdin>>,
     next_id: AtomicU64,
     pending_requests: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
+    pub uri_map: Arc<Mutex<HashMap<Url, Url>>>,
 }
 
 impl RustAnalyzerClient {
-    pub async fn new() -> Option<Self> {
+    pub async fn new(client: Client) -> Option<Self> {
         let mut child = Command::new("rust-analyzer")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -36,6 +39,9 @@ impl RustAnalyzerClient {
 
         let pending_requests = Arc::new(Mutex::new(HashMap::<u64, oneshot::Sender<Value>>::new()));
         let pending_requests_clone = pending_requests.clone();
+
+        let uri_map = Arc::new(Mutex::new(HashMap::<Url, Url>::new()));
+        let uri_map_clone = uri_map.clone();
 
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout);
@@ -115,8 +121,33 @@ impl RustAnalyzerClient {
                             }
                             (None, Some(method)) => {
                                 if method == "textDocument/publishDiagnostics" {
-                                    if let Some(params) = json.get("params") {
+                                    if let Some(params) = json.get("params")
+                                        && let Ok(mut diag_params) =
+                                            serde_json::from_value::<PublishDiagnosticsParams>(
+                                                params.clone(),
+                                            )
+                                    {
                                         tracing::debug!("RA Diagnostics Received:\n{:#?}", params);
+
+                                        let original_uri = {
+                                            let map = uri_map_clone.lock().await;
+                                            map.get(&diag_params.uri).cloned()
+                                        };
+                                        if let Some(html_uri) = original_uri {
+                                            diag_params.uri = html_uri;
+                                            tracing::debug!(
+                                                "RA Diagnostics Received, Uri: {:#?}",
+                                                diag_params.uri
+                                            );
+
+                                            client
+                                                .publish_diagnostics(
+                                                    diag_params.uri,
+                                                    diag_params.diagnostics,
+                                                    diag_params.version,
+                                                )
+                                                .await;
+                                        }
                                     }
                                 } else if method == "window/showMessage"
                                     || method == "window/logMessage"
@@ -140,6 +171,7 @@ impl RustAnalyzerClient {
             stdin,
             next_id: AtomicU64::new(1),
             pending_requests,
+            uri_map,
         })
     }
 
@@ -287,6 +319,21 @@ impl RustAnalyzerClient {
         }
 
         response.get("result").cloned().unwrap_or(Value::Null)
+    }
+
+    pub async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let response = json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didSave",
+            "params": params
+        });
+
+        let s = response.to_string();
+        let msg = format!("Content-Length: {}\r\n\r\n{}", s.len(), s);
+
+        let mut w = self.stdin.lock().await;
+        let _ = w.write_all(msg.as_bytes()).await;
+        let _ = w.flush().await;
     }
 
     #[allow(dead_code)]
