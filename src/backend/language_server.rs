@@ -136,50 +136,6 @@ impl LanguageServer for Backend {
             }
         };
 
-        // extract ---------
-        // let snippets = tree.extract_snippets(&self.state.language, &text);
-        // let fn_params = snippets
-        //     .iter()
-        //     .filter_map(|s| match s {
-        //         Snippet::Param { name: (_, n), ty } => {
-        //             let clean_name = n.strip_prefix("self ").unwrap_or(n).trim();
-        //             let clean_ty = match ty {
-        //                 Some((_, t)) => t.as_str().trim(),
-        //                 None => "impl ::rshtml::View",
-        //             };
-        //             Some(format!("{}: {}", clean_name, clean_ty))
-        //         }
-        //         _ => None,
-        //     })
-        //     .collect::<Vec<String>>()
-        //     .join(", ");
-
-        // let cleaned_source = text
-        //     .as_bytes()
-        //     .iter()
-        //     .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
-        //     .collect::<Vec<u8>>();
-
-        // let mut extract = Extract::new(cleaned_source);
-        // for snippet in snippets {
-        //     extract.push(snippet);
-        // }
-        // extract.extract();
-
-        // let extract_source = format!(
-        //     "fn render(child_content: impl ::rshtml::View, {1}) -> ::std::fmt::Result {{ {2} {0}",
-        //     "Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
-        //     fn_params,
-        //     String::from_utf8_lossy(&extract.source)
-        // );
-
-        // println!("Extracted Source: {}", extract_source);
-        // let header_offset = format!(
-        //     "fn render(child_content: impl ::rshtml::View, {}) -> ::std::fmt::Result {{ ",
-        //     fn_params
-        // ).chars().count();
-        // end extract ---------
-
         let use_directives = tree.find_uses(&self.state.language, &text);
         debug!("Use directives: {:?}", use_directives);
 
@@ -237,6 +193,27 @@ impl LanguageServer for Backend {
             let mut views = self.state.views.write().await;
 
             let errors = view.tree.find_error(&self.state.language, &view.source);
+
+            // let snippets = view
+            //     .tree
+            //     .extract_snippets(&self.state.language, &view.source);
+
+            // if let Some((_, module_file_path)) = &module_file {
+            //     let extract_source = Self::extract_source(snippets, &view.source);
+            //     let module_text = tokio::fs::read_to_string(&module_file_path)
+            //         .await
+            //         .map_err(|e| {
+            //             format!(
+            //                 "Failed to read file at '{}': {}",
+            //                 module_file_path.display(),
+            //                 e
+            //             )
+            //         })
+            //         .unwrap();
+
+            //     assert_eq!(extract_source.as_bytes(), module_text.as_bytes());
+            //     debug!("(DID OPEN) sources matched");
+            // }
 
             views.insert(uri_str, view);
 
@@ -329,25 +306,19 @@ impl LanguageServer for Backend {
                     .tree
                     .extract_snippets(&self.state.language, &view.source);
 
-                let cleaned_source = view
-                    .source
-                    .as_bytes()
-                    .iter()
-                    .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
-                    .collect::<Vec<u8>>();
+                let extract_source = Self::extract_source(snippets, &view.source);
 
-                Some((view.extract_file_uri.to_owned(), snippets, cleaned_source))
+                Some((view.extract_file_uri.to_owned(), extract_source))
             } else {
                 None
             }
         };
 
-        if let Some((Some(extract_file_uri), snippets, cleaned_source)) = extract_file {
+        if let Some((Some(extract_file_uri), extract_source)) = extract_file {
             self.ra_did_change(
                 params.text_document.version,
                 extract_file_uri,
-                cleaned_source,
-                snippets,
+                extract_source,
             )
             .await
             .unwrap_or_else(|e| debug!(e));

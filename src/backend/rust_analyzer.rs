@@ -56,39 +56,9 @@ impl Backend {
         &self,
         version: i32,
         uri: Url,
-        cleaned_source: Vec<u8>,
-        snippets: Vec<Snippet>,
+        extract_source: String,
     ) -> Result<(), String> {
         if let Some(Some(ra_client)) = self.ra_client.get() {
-            let fn_params = snippets
-                .iter()
-                .filter_map(|s| match s {
-                    Snippet::Param { name: (_, n), ty } => {
-                        let clean_name = n.strip_prefix("self ").unwrap_or(n).trim();
-                        let clean_ty = match ty {
-                            Some((_, t)) => t.as_str().trim(),
-                            None => "impl ::rshtml::View",
-                        };
-                        Some(format!("{}: {}", clean_name, clean_ty))
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<String>>()
-                .join(", ");
-
-            let mut extract = Extract::new(cleaned_source);
-            for snippet in snippets {
-                extract.push(snippet);
-            }
-            extract.extract();
-
-            let extract_source = format!(
-                "fn render(child_content: impl ::rshtml::View, {1}) -> ::std::fmt::Result {{ {2} {0}",
-                "Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
-                fn_params,
-                String::from_utf8_lossy(&extract.source)
-            );
-
             // println!(
             //     "(DID CHANGE) Uri: {}, Extracted Source: {}",
             //     uri.clone(),
@@ -144,22 +114,4 @@ impl Backend {
 
         Ok(Vec::new())
     }
-
-    // async fn create_module_file(
-    //     &self,
-    //     root_path: &Path,
-    //     module_name: String,
-    // ) -> io::Result<PathBuf> {
-    //     let rshtml_dir = root_path.join(".rshtml");
-    //     let module_file_path = rshtml_dir.join(format!("{}.rs", module_name));
-
-    //     tokio::fs::create_dir_all(&rshtml_dir).await?;
-
-    //     if !module_file_path.exists() {
-    //         tokio::fs::write(&module_file_path, "").await?;
-    //         debug!("module file path created: {module_file_path:?}");
-    //     }
-
-    //     Ok(module_file_path)
-    // }
 }

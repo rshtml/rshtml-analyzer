@@ -299,7 +299,7 @@ impl RustAnalyzerClient {
         response.get("result").cloned().unwrap_or(Value::Null)
     }
 
-    pub async fn analyzer_status(&self, uri: Url) -> String {
+    pub async fn _analyzer_status(&self, uri: Url) -> String {
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
 
         let response = self
@@ -313,43 +313,4 @@ impl RustAnalyzerClient {
             .unwrap_or_default()
             .to_string()
     }
-
-    // pub async fn update_rustflags<S: AsRef<str>>(&self, active_modules: &[S]) {
-    //     let mut rustflags = String::new();
-    //     let mut ra_cfgs: Vec<String> = Vec::new();
-
-    //     for module in active_modules {
-    //         let mod_str = module.as_ref();
-    //         rustflags.push_str(&format!("--cfg rshtml=\"{}\" ", mod_str));
-    //         ra_cfgs.push(format!("rshtml=\"{}\"", mod_str));
-    //     }
-    //     let rustflags = rustflags.trim().to_string();
-
-    //     debug!("RA RUSTFLAGS: {}", rustflags);
-    //     debug!("RA CFGS: {:?}", ra_cfgs);
-
-    //     let new_config = json!({
-    //         "cargo": {
-    //             "extraEnv": { "RUSTFLAGS": rustflags },
-    //             "cfgs": ra_cfgs
-    //         }
-    //     });
-
-    //     {
-    //         let mut config_lock = self.current_config.write().await;
-    //         *config_lock = new_config.clone();
-    //     }
-
-    //     let params = json!({
-    //         "settings": new_config
-    //     });
-
-    //     self.send_notification("workspace/didChangeConfiguration", params.to_owned())
-    //         .await;
-    //     debug!("RA configuration updated with new RUSTFLAGS: {params}");
-
-    //     self.send_request("rust-analyzer/reloadWorkspace", json!(null))
-    //         .await;
-    //     debug!("RA workspace reload request sent");
-    // }
 }

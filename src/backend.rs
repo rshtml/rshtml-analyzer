@@ -11,6 +11,8 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::app_state::AppState;
+use crate::app_state::view::View;
+use crate::backend::extract::{Extract, Snippet};
 use crate::rust_analyzer_client::RustAnalyzerClient;
 use tokio::fs;
 use tokio::sync::OnceCell;
@@ -160,6 +162,45 @@ impl Backend {
         }
 
         Ok(target_path)
+    }
+
+    pub fn extract_source(snippets: Vec<Snippet>, original_source: &str) -> String {
+        let cleaned_source = original_source
+            .as_bytes()
+            .iter()
+            .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
+            .collect::<Vec<u8>>();
+
+        let fn_params = snippets
+            .iter()
+            .filter_map(|s| match s {
+                Snippet::Param { name: (_, n), ty } => {
+                    let clean_name = n.strip_prefix("self ").unwrap_or(n).trim();
+                    let clean_ty = match ty {
+                        Some((_, t)) => t.as_str().trim(),
+                        None => "impl ::rshtml::View",
+                    };
+                    Some(format!("{}: {}", clean_name, clean_ty))
+                }
+                _ => None,
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let mut extract = Extract::new(cleaned_source);
+        for snippet in snippets {
+            extract.push(snippet);
+        }
+        extract.extract(original_source);
+
+        let extract_source = format!(
+            "fn render(child_content: impl ::rshtml::View, {1}) -> ::std::fmt::Result {{ {2} {0}",
+            "Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
+            fn_params,
+            String::from_utf8_lossy(&extract.source)
+        );
+
+        extract_source
     }
 }
 
