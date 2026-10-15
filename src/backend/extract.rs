@@ -189,13 +189,12 @@ impl Extract {
         let mut buf_idx = start;
 
         for &byte in content_bytes {
-            if self.source[buf_idx] == b'\n' {
-                self.source.insert(buf_idx, byte);
-                buf_idx += 1;
-            } else {
-                self.source[buf_idx] = byte;
-                buf_idx += 1;
+            match self.source.get(buf_idx) {
+                Some(b'\n') => self.source.insert(buf_idx, byte),
+                Some(_) => self.source[buf_idx] = byte,
+                None => self.source.push(byte),
             }
+            buf_idx += 1;
         }
     }
 }

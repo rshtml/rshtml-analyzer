@@ -1,5 +1,6 @@
 use crate::app_state::view::View;
 use crate::backend::Backend;
+use crate::backend::extract::{Extract, Snippet};
 use crate::backend::navigation_target::NavigationTarget;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::syntax_context::SyntaxContext;
@@ -63,7 +64,14 @@ impl LanguageServer for Backend {
                 semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec!["@".to_string(), "<".to_string()]),
+                    trigger_characters: Some(vec![
+                        "@".into(),
+                        "<".into(),
+                        ":".into(),
+                        ".".into(),
+                        "'".into(),
+                        "(".into(),
+                    ]),
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
@@ -488,6 +496,11 @@ impl LanguageServer for Backend {
             let syntax_context = SyntaxContext::detect(&view.tree, &view.source, position);
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
+            debug!(
+                "(COMPLATION) ctx: {:?}, pos: {:?}",
+                syntax_context, position
+            );
+
             let extract_file_uri: Option<Url> = if syntax_context == SyntaxContext::Html {
                 if let Some(tc) = trigger_char {
                     for (item_char, item) in view.completion_items.values() {
@@ -554,9 +567,9 @@ impl LanguageServer for Backend {
                 .await
                 .inspect_err(|e| debug!(e))
         {
-            debug!("RA complation items: {:?}", ra_items);
+            // debug!("RA complation items: {:?}", ra_items);
             completion_items.extend(ra_items);
-            debug!("RA complation extend work");
+            // debug!("RA complation extend work");
         } else {
             debug!("RA complation NOT work");
         }

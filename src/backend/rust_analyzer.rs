@@ -45,8 +45,8 @@ impl Backend {
                 .did_open(module_file_uri.to_owned(), module_text)
                 .await;
 
-            let response = ra_client.analyzer_status(module_file_uri.clone()).await;
-            println!("{}", response);
+            // let response = ra_client.analyzer_status(module_file_uri.clone()).await;
+            // println!("{}", response);
         }
 
         Ok(())
@@ -89,17 +89,20 @@ impl Backend {
                 String::from_utf8_lossy(&extract.source)
             );
 
-            println!(
-                "(DID CHANGE) Uri: {}, Extracted Source: {}",
-                uri.clone(),
-                extract_source
-            );
+            // println!(
+            //     "(DID CHANGE) Uri: {}, Extracted Source: {}",
+            //     uri.clone(),
+            //     extract_source
+            // );
 
             ra_client
                 .did_change(uri.clone(), version, extract_source)
                 .await;
 
-            debug!("RA did change sended, uri: {} version: {}", uri, version);
+            debug!(
+                "(DID CHANGE) RA did change sended, uri: {} version: {}",
+                uri, version
+            );
 
             // let response = ra_client.analyzer_status(uri.clone()).await;
             // println!("{}", response);
@@ -114,11 +117,14 @@ impl Backend {
         mut params: CompletionParams,
     ) -> Result<Vec<CompletionItem>, String> {
         params.text_document_position.text_document.uri = uri.to_owned();
-        debug!("COMPLATION uri: {uri:?}, \n\nparams: {params:?}");
+        // debug!("(COMPLATION) uri: {uri:?}, \n\nparams: {params:?}");
 
         if let Some(Some(ra_client)) = self.ra_client.get() {
+            let t = std::time::Instant::now();
             let completion_value = ra_client.completion(params).await;
-            debug!("RA completion value: {:?}", completion_value);
+            debug!("(COMPLATION) RA completion took {:?}", t.elapsed());
+            // debug!("(COMPLATION) RA completion value: {:?}", completion_value);
+
             if completion_value.is_null() {
                 return Ok(Vec::new());
             }

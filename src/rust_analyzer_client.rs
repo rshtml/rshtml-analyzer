@@ -7,10 +7,11 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 use tower_lsp::lsp_types::{
-    ClientCapabilities, CompletionParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
-    InitializeParams, Position, Range, TextDocumentClientCapabilities,
-    TextDocumentContentChangeEvent, TextDocumentItem, TextDocumentPositionParams,
-    TextDocumentSyncClientCapabilities, Url, VersionedTextDocumentIdentifier,
+    ClientCapabilities, CompletionClientCapabilities, CompletionItemCapability, CompletionParams,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, MarkupKind, Position,
+    Range, TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentItem,
+    TextDocumentPositionParams, TextDocumentSyncClientCapabilities, Url,
+    VersionedTextDocumentIdentifier,
 };
 use tracing::{debug, error};
 
@@ -206,6 +207,14 @@ impl RustAnalyzerClient {
                 will_save: Some(false),
                 will_save_wait_until: Some(false),
             }),
+            completion: Some(CompletionClientCapabilities {
+                context_support: Some(true),
+                completion_item: Some(CompletionItemCapability {
+                    snippet_support: Some(true),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
             ..Default::default()
         });
 
@@ -282,6 +291,10 @@ impl RustAnalyzerClient {
                 serde_json::to_value(params).unwrap(),
             )
             .await;
+
+        if let Some(err) = response.get("error") {
+            debug!("(COMPLATION) RA completion error: {err}");
+        }
 
         response.get("result").cloned().unwrap_or(Value::Null)
     }
