@@ -1,11 +1,11 @@
 use crate::app_state::view::View;
 use crate::backend::Backend;
-use crate::backend::extract::{Extract, Snippet};
 use crate::backend::navigation_target::NavigationTarget;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::syntax_context::SyntaxContext;
 use crate::backend::tree_extensions::TreeExtensions;
 use crate::consts;
+use crate::rust_analyzer_client::RustAnalyzerClient;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
@@ -53,7 +53,15 @@ impl LanguageServer for Backend {
             });
         }
 
-        self.ra_initialize(params.root_uri).await;
+        let ra_option = RustAnalyzerClient::new().await;
+        if let Some(ra) = &ra_option {
+            ra.initialize(params.root_uri).await;
+            ra.initialized().await;
+        }
+        let _ = self
+            .ra_client
+            .set(ra_option)
+            .inspect_err(|e| debug!("RA client could not be set: {e}"));
 
         debug!("Sending an initialize response.");
         Ok(InitializeResult {
@@ -116,7 +124,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let msg = format!("Opened file: {}", &params.text_document.uri);
+        let msg = format!("Opened file: {}", params.text_document.uri);
         self.client.log_message(MessageType::INFO, &msg).await;
         debug!(msg);
 
@@ -153,7 +161,7 @@ impl LanguageServer for Backend {
         let template_params = tree.find_template_params(&self.state.language, &text);
         debug!("Template params: {:?}", template_params);
 
-        let module_file = async {
+        let extract_file = async {
             let path = params
                 .text_document
                 .uri
@@ -166,16 +174,16 @@ impl LanguageServer for Backend {
             let workspace = self.state.workspace.read().await;
             let (root_path, relative_path) = workspace.find_root_and_relative_path(&path);
 
-            let module_file_path = Self::generate_module_path(&root_path, &relative_path)
+            let extract_file_path = Self::generate_extract_file_path(&root_path, &relative_path)
                 .await
                 .map_err(|e| debug!("generate_module_path error: {}", e))
                 .ok()?;
 
-            let module_file_uri = Url::from_file_path(&module_file_path)
-                .map_err(|_| debug!("Couldn't convert file to uri: {:?}", module_file_path))
+            let extract_file_uri = Url::from_file_path(&extract_file_path)
+                .map_err(|_| debug!("Couldn't convert file to uri: {:?}", extract_file_path))
                 .ok()?;
 
-            Some((module_file_uri, module_file_path))
+            Some((extract_file_uri, extract_file_path))
         }
         .await;
 
@@ -184,7 +192,7 @@ impl LanguageServer for Backend {
                 text.to_owned(),
                 tree.to_owned(),
                 params.text_document.version as usize,
-                module_file.as_ref().map(|x| x.0.clone()),
+                extract_file.as_ref().map(|x| x.0.clone()),
             );
             view.use_directives = use_directives_with_params;
             view.create_use_directive_completion_items();
@@ -211,8 +219,30 @@ impl LanguageServer for Backend {
             //         })
             //         .unwrap();
 
-            //     assert_eq!(extract_source.as_bytes(), module_text.as_bytes());
-            //     debug!("(DID OPEN) sources matched");
+            //     if extract_source != module_text {
+            //         debug!("(DID OPEN) SOURCES MISMATCH! Analyzing differences...");
+
+            //         let extracted_lines: Vec<&str> = extract_source.lines().collect();
+            //         let module_lines: Vec<&str> = module_text.lines().collect();
+
+            //         let max_lines = std::cmp::max(extracted_lines.len(), module_lines.len());
+
+            //         for i in 0..max_lines {
+            //             let e_line = extracted_lines.get(i).unwrap_or(&"<EOF>");
+            //             let m_line = module_lines.get(i).unwrap_or(&"<EOF>");
+
+            //             if e_line != m_line {
+            //                 debug!("Difference found at Line {}:", i + 1);
+            //                 debug!("  Extracted (RAM): {:?}", e_line);
+            //                 debug!("  Module (Disk)  : {:?}", m_line);
+            //                 continue;
+            //             }
+            //         }
+            //     } else {
+            //         debug!("(DID OPEN) sources matched perfectly");
+            //     }
+            //     // assert_eq!(extract_source.as_bytes(), module_text.as_bytes());
+            //     // debug!("(DID OPEN) sources matched");
             // }
 
             views.insert(uri_str, view);
@@ -220,11 +250,28 @@ impl LanguageServer for Backend {
             errors
         };
 
-        if let Some((module_file_uri, module_file_path)) = &module_file {
-            self.ra_did_open(module_file_uri, module_file_path)
+        let _ = async {
+            let (extract_file_uri, extract_file_path) = extract_file?;
+
+            let extract_text = tokio::fs::read_to_string(&extract_file_path)
                 .await
-                .unwrap_or_else(|e| debug!(e));
+                .inspect_err(|e| {
+                    debug!(
+                        "Failed to read file at '{}': {}",
+                        extract_file_path.display(),
+                        e
+                    )
+                })
+                .ok()?;
+
+            let ra_client = self.ra_client.get()?.as_ref()?;
+            ra_client
+                .did_open(extract_file_uri.to_owned(), extract_text)
+                .await;
+
+            Some(())
         }
+        .await;
 
         self.client
             .publish_diagnostics(
@@ -236,7 +283,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let msg = format!("Changed file: {}", &params.text_document.uri);
+        let msg = format!("Changed file: {}", params.text_document.uri);
         self.client.log_message(MessageType::INFO, msg).await;
 
         let uri_str = params.text_document.uri.to_string();
@@ -314,15 +361,30 @@ impl LanguageServer for Backend {
             }
         };
 
-        if let Some((Some(extract_file_uri), extract_source)) = extract_file {
-            self.ra_did_change(
-                params.text_document.version,
-                extract_file_uri,
-                extract_source,
-            )
-            .await
-            .unwrap_or_else(|e| debug!(e));
+        let _ = async {
+            let (extract_file_uri, extract_source) =
+                extract_file.and_then(|(u, s)| Some((u?, s)))?;
+
+            let ra_client = self.ra_client.get()?.as_ref()?;
+
+            debug!(
+                "(DID CHANGE) RA did change will send, uri: {} version: {}",
+                extract_file_uri, params.text_document.version
+            );
+
+            ra_client
+                .did_change(
+                    extract_file_uri,
+                    params.text_document.version,
+                    extract_source,
+                )
+                .await;
+
+            debug!("(DID CHANGE) RA did change sent",);
+
+            Some(())
         }
+        .await;
 
         self.client
             .publish_diagnostics(
@@ -334,7 +396,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let msg = format!("Closed file: {}", &params.text_document.uri);
+        let msg = format!("Closed file: {}", params.text_document.uri);
         self.client.log_message(MessageType::INFO, msg).await;
         let uri_str = params.text_document.uri.to_string();
 
@@ -532,18 +594,35 @@ impl LanguageServer for Backend {
             (completion_items, extract_file_uri)
         };
 
-        if let Some(extract_file_uri) = extract_file_uri
-            && let Ok(ra_items) = self
-                .ra_completion(extract_file_uri, params.clone())
-                .await
-                .inspect_err(|e| debug!(e))
-        {
-            // debug!("RA complation items: {:?}", ra_items);
-            completion_items.extend(ra_items);
-            // debug!("RA complation extend work");
-        } else {
-            debug!("RA complation NOT work");
+        let ra_items = async {
+            let mut ra_params = params.clone();
+            ra_params.text_document_position.text_document.uri = extract_file_uri?;
+
+            let ra_client = self.ra_client.get()?.as_ref()?;
+
+            debug!(
+                "(COMPLETION) RA completion will send, uri: ({})",
+                &ra_params.text_document_position.text_document.uri
+            );
+            let completion_value = ra_client.completion(ra_params).await;
+            debug!("(COMPLETION) RA completion sent");
+
+            let response = Some(completion_value)
+                .filter(|v| !v.is_null())
+                .and_then(|v| {
+                    serde_json::from_value::<CompletionResponse>(v)
+                        .inspect_err(|e| debug!("RA Completion JSON parse error: {}", e))
+                        .ok()
+                })?;
+
+            match response {
+                CompletionResponse::Array(items) => Some(items),
+                CompletionResponse::List(completion_list) => Some(completion_list.items),
+            }
         }
+        .await;
+
+        completion_items.extend(ra_items.into_iter().flatten());
 
         return Ok(Some(CompletionResponse::List(CompletionList {
             is_incomplete: true,

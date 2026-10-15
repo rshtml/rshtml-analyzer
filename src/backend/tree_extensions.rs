@@ -162,6 +162,7 @@ impl TreeExtensions for tree_sitter::Tree {
                     (param (param_name) @param_name (rust_text)? @param_rust_text)
                     (rust_text) @rust_text
                     (if_stmt [(open_brace) (close_brace)] @brace)
+                    (else_clause [(open_brace) (close_brace)] @brace)
                     (for_stmt [(open_brace) (close_brace)] @brace)
                     (while_stmt [(open_brace) (close_brace)] @brace)
                     (child_content_) @child_content
@@ -169,59 +170,43 @@ impl TreeExtensions for tree_sitter::Tree {
                     (break_) @break
                 ]";
 
-        let snippets = self
-            .find(language, query_str, source, |x| {
-                // let capture = x.captures.first()?;
-                // let s = capture.node.utf8_text(source.as_bytes()).ok()?.to_string();
-                // let snippet = Snippet::Block(capture.node.byte_range(), s);
+        self.find(language, query_str, source, |x| {
+            let first_cap = x.captures.first()?;
+            let node = first_cap.node;
+            let range = node.byte_range();
+            let text = node.utf8_text(source.as_bytes()).ok()?.to_string();
 
-                // Some(snippet)
+            match node.kind() {
+                "param_name" => {
+                    let ty = x.captures.get(1).and_then(|rt_cap| {
+                        let rt_node = rt_cap.node;
+                        let rt_text = rt_node.utf8_text(source.as_bytes()).ok()?.to_string();
+                        Some((rt_node.byte_range(), rt_text))
+                    });
 
-                let first_cap = x.captures.first()?;
-                let node = first_cap.node;
-                let range = node.byte_range();
-                let text = node.utf8_text(source.as_bytes()).ok()?.to_string();
-
-                match node.kind() {
-                    // 1. Parametreler
-                    "param_name" => {
-                        let ty = x.captures.get(1).and_then(|rt_cap| {
-                            let rt_node = rt_cap.node;
-                            let rt_text = rt_node.utf8_text(source.as_bytes()).ok()?.to_string();
-                            Some((rt_node.byte_range(), rt_text))
-                        });
-
-                        Some(Snippet::Param {
-                            name: (range, text),
-                            ty,
-                        })
-                    }
-
-                    // 2. Doğrudan Expr olanlar
-                    "child_content_" | "continue_" | "break_" => Some(Snippet::Expr(range, text)),
-
-                    // 3. Ebeveynine göre ayrılan rust_text'ler
-                    "rust_text" => {
-                        let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
-
-                        match parent_kind {
-                            "param" => None,
-                            "rust_expr_paren" => Some(Snippet::Expr(range, text)),
-                            "rust_expr_simple" => Some(Snippet::ExprSimple(range, text)),
-                            _ => Some(Snippet::Statement(range, text)),
-                        }
-                    }
-
-                    // 4. open_brace ve close_brace doğrudan buradan Statement olarak döner
-                    _ => Some(Snippet::Statement(range, text)),
+                    Some(Snippet::Param {
+                        name: (range, text),
+                        ty,
+                    })
                 }
-            })
-            .unwrap_or_else(|x| {
-                error!("Error during extract query: {}", x);
-                vec![]
-            });
+                "child_content_" | "continue_" | "break_" => Some(Snippet::Expr(range, text)),
+                "rust_text" => {
+                    let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
 
-        snippets
+                    match parent_kind {
+                        "param" => None,
+                        "rust_expr_paren" => Some(Snippet::ExprParen(range, text)),
+                        "rust_expr_simple" => Some(Snippet::ExprSimple(range, text)),
+                        _ => Some(Snippet::Statement(range, text)),
+                    }
+                }
+                _ => Some(Snippet::Statement(range, text)),
+            }
+        })
+        .unwrap_or_else(|x| {
+            error!("Error during extract query: {}", x);
+            vec![]
+        })
     }
 }
 

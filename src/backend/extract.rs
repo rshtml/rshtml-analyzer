@@ -3,6 +3,7 @@ use std::{mem, ops::Range};
 #[derive(Debug, Clone)]
 pub enum Snippet {
     ExprSimple(Range<usize>, String),
+    ExprParen(Range<usize>, String),
     Expr(Range<usize>, String),
     Statement(Range<usize>, String),
     Param {
@@ -14,7 +15,10 @@ pub enum Snippet {
 impl Snippet {
     pub fn start(&self) -> usize {
         match self {
-            Snippet::ExprSimple(r, _) | Snippet::Expr(r, _) | Snippet::Statement(r, _) => r.start,
+            Snippet::ExprSimple(r, _)
+            | Snippet::Expr(r, _)
+            | Snippet::Statement(r, _)
+            | Snippet::ExprParen(r, _) => r.start,
             Snippet::Param { .. } => 0,
         }
     }
@@ -55,6 +59,10 @@ impl Extract {
                 let expr = format!("&{};", expr);
                 self.source_replace(&expr, range.start - 1);
             }
+            Snippet::ExprParen(range, expr) => {
+                let expr = format!("&{};", expr);
+                self.source_replace(&expr, range.start - 1);
+            }
             Snippet::ExprSimple(range, expr) => {
                 let expr = format!("&{};", expr);
                 self.snippets.push(Snippet::ExprSimple(range, expr));
@@ -67,28 +75,20 @@ impl Extract {
     }
 
     pub fn source_replace(&mut self, content: &str, start: usize) {
-        let content_bytes = content.as_bytes();
-        let mut buf_idx = start;
-
-        for &byte in content_bytes {
-            if buf_idx < self.source.len() {
-                self.source[buf_idx] = byte;
-                buf_idx += 1;
-            }
+        let bytes = content.as_bytes();
+        let end = (start + bytes.len()).min(self.source.len());
+        if start < end {
+            self.source[start..end].copy_from_slice(&bytes[..end - start]);
         }
     }
 
     pub fn source_replace_insert(&mut self, content: &str, start: usize) {
-        let content_bytes = content.as_bytes();
-        let mut buf_idx = start;
-
-        for &byte in content_bytes {
+        for (buf_idx, &byte) in (start..).zip(content.as_bytes()) {
             match self.source.get(buf_idx) {
                 Some(b'\n') => self.source.insert(buf_idx, byte),
                 Some(_) => self.source[buf_idx] = byte,
                 None => self.source.push(byte),
             }
-            buf_idx += 1;
         }
     }
 

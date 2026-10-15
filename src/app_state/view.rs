@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url,
 };

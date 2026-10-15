@@ -1,7 +1,6 @@
 mod extract;
 mod language_server;
 pub mod navigation_target;
-mod rust_analyzer;
 pub mod semantic_tokens_builder;
 mod server_capabilities;
 pub mod syntax_context;
@@ -11,7 +10,6 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::app_state::AppState;
-use crate::app_state::view::View;
 use crate::backend::extract::{Extract, Snippet};
 use crate::rust_analyzer_client::RustAnalyzerClient;
 use tokio::fs;
@@ -113,7 +111,7 @@ impl Backend {
         }
     }
 
-    pub async fn generate_module_path(
+    pub async fn generate_extract_file_path(
         root_path: &Path,
         relative_path: &Path,
     ) -> io::Result<PathBuf> {

@@ -8,10 +8,9 @@ use tokio::process::{ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 use tower_lsp::lsp_types::{
     ClientCapabilities, CompletionClientCapabilities, CompletionItemCapability, CompletionParams,
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams, MarkupKind, Position,
-    Range, TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentItem,
-    TextDocumentPositionParams, TextDocumentSyncClientCapabilities, Url,
-    VersionedTextDocumentIdentifier,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, InitializeParams,
+    TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentItem,
+    TextDocumentSyncClientCapabilities, Url, VersionedTextDocumentIdentifier,
 };
 use tracing::{debug, error};
 
@@ -107,12 +106,11 @@ impl RustAnalyzerClient {
                                 let _ = w.flush().await;
                             }
                             (Some(id), None) => {
-                                if let Some(id) = id.as_u64() {
-                                    if let Some(tx) =
+                                if let Some(id) = id.as_u64()
+                                    && let Some(tx) =
                                         pending_requests_clone.lock().await.remove(&id)
-                                    {
-                                        let _ = tx.send(json);
-                                    }
+                                {
+                                    let _ = tx.send(json);
                                 }
                             }
                             (None, Some(method)) => {
@@ -194,29 +192,28 @@ impl RustAnalyzerClient {
     }
 
     pub async fn initialize(&self, root_uri: Option<Url>) -> Value {
-        let initialization_options = json!({
-            // "cargo": { "extraEnv": { "RUSTFLAGS": "--cfg rshtml" }, "cfgs": ["rshtml"] },
-            "rust": { "analyzerTargetDir": true }
-        });
+        let initialization_options = json!({ "rust": { "analyzerTargetDir": true }});
 
-        let mut client_capabilities = ClientCapabilities::default();
-        client_capabilities.text_document = Some(TextDocumentClientCapabilities {
-            synchronization: Some(TextDocumentSyncClientCapabilities {
-                did_save: Some(true),
-                dynamic_registration: Some(false),
-                will_save: Some(false),
-                will_save_wait_until: Some(false),
-            }),
-            completion: Some(CompletionClientCapabilities {
-                context_support: Some(true),
-                completion_item: Some(CompletionItemCapability {
-                    snippet_support: Some(true),
+        let client_capabilities = ClientCapabilities {
+            text_document: Some(TextDocumentClientCapabilities {
+                synchronization: Some(TextDocumentSyncClientCapabilities {
+                    did_save: Some(true),
+                    dynamic_registration: Some(false),
+                    will_save: Some(false),
+                    will_save_wait_until: Some(false),
+                }),
+                completion: Some(CompletionClientCapabilities {
+                    context_support: Some(true),
+                    completion_item: Some(CompletionItemCapability {
+                        snippet_support: Some(true),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 }),
                 ..Default::default()
             }),
             ..Default::default()
-        });
+        };
 
         let params = InitializeParams {
             root_uri,
@@ -224,13 +221,6 @@ impl RustAnalyzerClient {
             initialization_options: Some(initialization_options),
             ..Default::default()
         };
-
-        // let params = InitializeParams {
-        //     root_uri,
-        //     capabilities: ClientCapabilities::default(),
-        //     initialization_options: Some(initialization_options),
-        //     ..Default::default()
-        // };
 
         let response = self
             .send_request("initialize", serde_json::to_value(params).unwrap())
