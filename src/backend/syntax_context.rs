@@ -101,7 +101,27 @@ impl SyntaxContext {
                     }
                 }
                 "html_text" => return Self::Html,
-                _ => {}
+                _ => {
+                    if byte_offset > 0
+                        && let Some(prev) =
+                            root.descendant_for_byte_range(byte_offset - 1, byte_offset - 1)
+                    {
+                        let target = if prev.kind() == "ERROR" {
+                            prev.prev_sibling().unwrap_or(prev)
+                        } else if prev.parent().is_some_and(|p| p.kind() == "ERROR") {
+                            prev.parent().and_then(|p| p.prev_sibling()).unwrap_or(prev)
+                        } else {
+                            prev
+                        };
+                        if target.kind() == "rust_expr_simple"
+                            || prev
+                                .parent()
+                                .is_some_and(|p| p.kind() == "rust_expr_simple")
+                        {
+                            return Self::RustCode;
+                        }
+                    }
+                }
             }
             current = n.parent();
         }

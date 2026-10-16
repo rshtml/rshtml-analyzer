@@ -136,7 +136,7 @@ impl RustAnalyzerClient {
                                         if let Some(html_uri) = original_uri {
                                             diag_params.uri = html_uri;
                                             tracing::debug!(
-                                                "RA Diagnostics Received, Uri: {:#?}",
+                                                "RA diagnostics will send to editor, Uri: {:#?}",
                                                 diag_params.uri
                                             );
 
