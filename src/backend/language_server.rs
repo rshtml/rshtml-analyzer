@@ -556,6 +556,9 @@ impl LanguageServer for Backend {
 
                     if tc == '@' {
                         completion_items.extend(self.state.completion_items.clone());
+                        view.extract_file_uri.to_owned()
+                    } else {
+                        None
                     }
                 } else {
                     for (_, item) in view.completion_items.values() {
@@ -563,9 +566,9 @@ impl LanguageServer for Backend {
                     }
 
                     completion_items.extend(self.state.completion_items.clone());
-                }
 
-                None
+                    None
+                }
             } else {
                 match syntax_context {
                     SyntaxContext::ComponentTag => {
@@ -634,7 +637,21 @@ impl LanguageServer for Backend {
         }
         .await;
 
-        completion_items.extend(ra_items.into_iter().flatten());
+        if let Some(tg) = trigger_char
+            && tg == '@'
+        {
+            completion_items.extend(ra_items.into_iter().flatten().filter(
+                |item| match item.kind {
+                    Some(CompletionItemKind::VARIABLE) => true,
+                    Some(CompletionItemKind::FUNCTION) => {
+                        ["json(...)", "json_let(...)", "time(...)"].contains(&item.label.as_str())
+                    }
+                    _ => false,
+                },
+            ));
+        } else {
+            completion_items.extend(ra_items.into_iter().flatten());
+        }
 
         return Ok(Some(CompletionResponse::List(CompletionList {
             is_incomplete: true,
