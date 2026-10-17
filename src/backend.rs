@@ -27,11 +27,7 @@ pub struct Backend {
 
 impl Backend {
     pub fn new(client: Client, app_state: AppState) -> Self {
-        Self {
-            client,
-            state: app_state,
-            ra_client: OnceCell::new(),
-        }
+        Self { client, state: app_state, ra_client: OnceCell::new() }
     }
 
     pub fn position_to_byte_offset(text: &str, position: Position) -> usize {
@@ -59,10 +55,8 @@ impl Backend {
     }
 
     pub fn calculate_new_end_point(start_pos: Position, text: &str) -> Point {
-        let mut new_pos = Point {
-            row: start_pos.line as usize,
-            column: start_pos.character as usize,
-        };
+        let mut new_pos =
+            Point { row: start_pos.line as usize, column: start_pos.character as usize };
 
         for (i, line) in text.lines().enumerate() {
             if i == 0 {
@@ -170,32 +164,15 @@ impl Backend {
             .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
             .collect::<Vec<u8>>();
 
-        let fn_params = snippets
-            .iter()
-            .filter_map(|s| match s {
-                Snippet::Param { name: (_, n), ty } => {
-                    let clean_name = n.strip_prefix("self ").unwrap_or(n).trim();
-                    let clean_ty = match ty {
-                        Some((_, t)) => t.as_str().trim(),
-                        None => "impl ::rshtml::View",
-                    };
-                    Some(format!("{}: {}", clean_name, clean_ty))
-                }
-                _ => None,
-            })
-            .collect::<Vec<String>>()
-            .join(", ");
-
         let mut extract = Extract::new(cleaned_source);
         for snippet in snippets {
             extract.push(snippet);
         }
-        extract.extract(original_source);
+        extract.extract();
 
         let extract_source = format!(
-            "fn render(child_content: impl ::rshtml::View, {1}) -> ::std::fmt::Result {{ {2} {0}",
-            "Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
-            fn_params,
+            "{1} {0}",
+            " Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
             String::from_utf8_lossy(&extract.source)
         );
 
@@ -248,30 +225,15 @@ mod tests {
     fn test_position_to_byte_offset_ascii() {
         let text = "hello\nworld\nrshtml";
         // Line 0, char 0 -> 0
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 0)),
-            0
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 0)), 0);
         // Line 0, char 5 -> 5 ('\n')
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 5)),
-            5
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 5)), 5);
         // Line 1, char 0 -> 6 ('w')
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(1, 0)),
-            6
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(1, 0)), 6);
         // Line 2, char 6 -> 18 (end of file)
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(2, 6)),
-            18
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(2, 6)), 18);
         // Position past the end falls back to text.len()
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(10, 0)),
-            18
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(10, 0)), 18);
     }
 
     #[test]
@@ -280,25 +242,13 @@ mod tests {
         // 'á' is 2 bytes in UTF-8, 1 UTF-16 code unit
         let text = "🦀 á";
         // At start
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 0)),
-            0
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 0)), 0);
         // After '🦀' (2 UTF-16 code units) -> byte offset 4
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 2)),
-            4
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 2)), 4);
         // After space (2 + 1 = 3 UTF-16 units) -> byte offset 5
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 3)),
-            5
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 3)), 5);
         // After 'á' (3 + 1 = 4 UTF-16 units) -> byte offset 7 (end of text)
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 4)),
-            7
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 4)), 7);
     }
 
     #[test]
@@ -328,10 +278,7 @@ mod tests {
 
         // Replace "hello" with "world!" (range: line 0, col 5 to line 0, col 10)
         let change = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position::new(0, 5),
-                end: Position::new(0, 10),
-            }),
+            range: Some(Range { start: Position::new(0, 5), end: Position::new(0, 10) }),
             range_length: None,
             text: "world!".to_string(),
         };

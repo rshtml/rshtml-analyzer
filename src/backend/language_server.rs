@@ -25,10 +25,7 @@ use tracing::{debug, error};
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult, Error> {
-        debug!(
-            "The Initialize request has been received (build: {})...",
-            consts::BUILD_MODE
-        );
+        debug!("The Initialize request has been received (build: {})...", consts::BUILD_MODE);
 
         let workspace_root_path = params
             .workspace_folders
@@ -47,10 +44,7 @@ impl LanguageServer for Backend {
             let mut workspace = self.state.workspace.write().await;
             workspace.root = path.to_path_buf();
             workspace.load(&path).unwrap_or_else(|e| {
-                debug!(
-                    "Workspace couldn't load: {}, operating in single-file mode",
-                    e
-                );
+                debug!("Workspace couldn't load: {}, operating in single-file mode", e);
             });
         }
 
@@ -90,11 +84,7 @@ impl LanguageServer for Backend {
             },
             server_info: Some(ServerInfo {
                 name: "rshtml-analyzer".to_string(),
-                version: Some(format!(
-                    "{} ({})",
-                    env!("CARGO_PKG_VERSION"),
-                    consts::BUILD_MODE
-                )),
+                version: Some(format!("{} ({})", env!("CARGO_PKG_VERSION"), consts::BUILD_MODE)),
             }),
         })
     }
@@ -107,16 +97,11 @@ impl LanguageServer for Backend {
         );
 
         if cfg!(debug_assertions) {
-            self.client
-                .show_message(MessageType::INFO, &version_msg)
-                .await;
+            self.client.show_message(MessageType::INFO, &version_msg).await;
         }
 
         self.client
-            .log_message(
-                MessageType::INFO,
-                format!("{version_msg} Handshake completed."),
-            )
+            .log_message(MessageType::INFO, format!("{version_msg} Handshake completed."))
             .await;
     }
 
@@ -203,13 +188,12 @@ impl LanguageServer for Backend {
 
             let errors = view.tree.find_error(&self.state.language, &view.source);
 
-            // Self::debug_check_source_mismatch(
-            //     &extract_file,
-            //     view.tree
-            //         .extract_snippets(&self.state.language, &view.source),
-            //     &view.source,
-            // )
-            // .await;
+            Self::debug_check_source_mismatch(
+                &extract_file,
+                view.tree.extract_snippets(&self.state.language, &view.source),
+                &view.source,
+            )
+            .await;
 
             views.insert(uri_str, view);
 
@@ -222,11 +206,7 @@ impl LanguageServer for Backend {
             let extract_text = tokio::fs::read_to_string(&extract_file_path)
                 .await
                 .inspect_err(|e| {
-                    debug!(
-                        "Failed to read file at '{}': {}",
-                        extract_file_path.display(),
-                        e
-                    )
+                    debug!("Failed to read file at '{}': {}", extract_file_path.display(), e)
                 })
                 .ok()?;
 
@@ -291,10 +271,7 @@ impl LanguageServer for Backend {
 
                 view.template_params = template_params;
 
-                (
-                    new_uses,
-                    view.tree.find_error(&self.state.language, &view.source),
-                )
+                (new_uses, view.tree.find_error(&self.state.language, &view.source))
             } else {
                 error!("view {uri_str} not found");
                 return;
@@ -323,9 +300,7 @@ impl LanguageServer for Backend {
 
                 view.update_use_directive_completion_items();
 
-                let snippets = view
-                    .tree
-                    .extract_snippets(&self.state.language, &view.source);
+                let snippets = view.tree.extract_snippets(&self.state.language, &view.source);
 
                 let extract_source = Self::extract_source(snippets, &view.source);
 
@@ -347,11 +322,7 @@ impl LanguageServer for Backend {
             );
 
             ra_client
-                .did_change(
-                    extract_file_uri,
-                    params.text_document.version,
-                    extract_source,
-                )
+                .did_change(extract_file_uri, params.text_document.version, extract_source)
                 .await;
 
             debug!("(DID CHANGE) RA did change sent",);
@@ -379,10 +350,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        debug!(
-            "(DID SAVE) triggered for file: {}",
-            params.text_document.uri
-        );
+        debug!("(DID SAVE) triggered for file: {}", params.text_document.uri);
 
         let _ = async {
             let extract_file_uri = {
@@ -401,9 +369,7 @@ impl LanguageServer for Backend {
             };
 
             let params = DidSaveTextDocumentParams {
-                text_document: TextDocumentIdentifier {
-                    uri: extract_file_uri,
-                },
+                text_document: TextDocumentIdentifier { uri: extract_file_uri },
                 text: None,
             };
 
@@ -471,11 +437,7 @@ impl LanguageServer for Backend {
             let tokens_diff =
                 highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
 
-            debug!(
-                "Semantic Tokens Delta: {:?} {:?}",
-                tokens_diff.len(),
-                tokens_diff
-            );
+            debug!("Semantic Tokens Delta: {:?} {:?}", tokens_diff.len(), tokens_diff);
 
             view.semantic_tokens_version += 1;
             view.semantic_tokens = SemanticTokens {
@@ -483,12 +445,10 @@ impl LanguageServer for Backend {
                 data: tokens.clone(),
             };
 
-            return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(
-                SemanticTokensDelta {
-                    result_id: Some(view.semantic_tokens_version.to_string()),
-                    edits: tokens_diff,
-                },
-            )));
+            return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
+                result_id: Some(view.semantic_tokens_version.to_string()),
+                edits: tokens_diff,
+            })));
         }
 
         Ok(None)
@@ -541,10 +501,7 @@ impl LanguageServer for Backend {
             let syntax_context = SyntaxContext::detect(&view.tree, &view.source, position);
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
-            debug!(
-                "(COMPLATION) ctx: {:?}, pos: {:?}",
-                syntax_context, position
-            );
+            debug!("(COMPLATION) ctx: {:?}, pos: {:?}", syntax_context, position);
 
             let extract_file_uri: Option<Url> = if syntax_context == SyntaxContext::Html {
                 if let Some(tc) = trigger_char {
@@ -622,13 +579,11 @@ impl LanguageServer for Backend {
             let completion_value = ra_client.completion(ra_params).await;
             debug!("(COMPLETION) RA completion sent");
 
-            let response = Some(completion_value)
-                .filter(|v| !v.is_null())
-                .and_then(|v| {
-                    serde_json::from_value::<CompletionResponse>(v)
-                        .inspect_err(|e| debug!("RA Completion JSON parse error: {}", e))
-                        .ok()
-                })?;
+            let response = Some(completion_value).filter(|v| !v.is_null()).and_then(|v| {
+                serde_json::from_value::<CompletionResponse>(v)
+                    .inspect_err(|e| debug!("RA Completion JSON parse error: {}", e))
+                    .ok()
+            })?;
 
             match response {
                 CompletionResponse::Array(items) => Some(items),
@@ -704,20 +659,11 @@ impl LanguageServer for Backend {
             )
         {
             let (range, markdown) = match target {
-                NavigationTarget::Component {
-                    name,
-                    target_uri,
-                    range,
-                    params,
-                } => {
+                NavigationTarget::Component { name, target_uri, range, params } => {
                     let params_doc = if params.is_empty() {
                         "_No parameters_".to_string()
                     } else {
-                        params
-                            .iter()
-                            .map(|p| format!("- `{}`", p))
-                            .collect::<Vec<_>>()
-                            .join("\n")
+                        params.iter().map(|p| format!("- `{}`", p)).collect::<Vec<_>>().join("\n")
                     };
 
                     let file_name = target_uri
@@ -731,11 +677,7 @@ impl LanguageServer for Backend {
 
                     (range, doc)
                 }
-                NavigationTarget::UseDirective {
-                    path,
-                    target_uri: _,
-                    range,
-                } => {
+                NavigationTarget::UseDirective { path, target_uri: _, range } => {
                     let doc = format!("### Component Import\n\n`{path}`");
                     (range, doc)
                 }
@@ -754,10 +696,8 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let cargo_toml_changed = params
-            .changes
-            .iter()
-            .any(|event| event.uri.path().ends_with("/Cargo.toml"));
+        let cargo_toml_changed =
+            params.changes.iter().any(|event| event.uri.path().ends_with("/Cargo.toml"));
 
         if !cargo_toml_changed {
             return;

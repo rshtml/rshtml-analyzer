@@ -136,18 +136,10 @@ impl TreeExtensions for tree_sitter::Tree {
             let message = if node.is_missing() {
                 format!("Missing `{}`", node.kind().replace('_', " "))
             } else {
-                format!(
-                    "Syntax error in `{}`",
-                    node.utf8_text(source.as_bytes()).ok()?
-                )
+                format!("Syntax error in `{}`", node.utf8_text(source.as_bytes()).ok()?)
             };
 
-            let diagnostic = Diagnostic {
-                range,
-                message,
-                severity,
-                ..Default::default()
-            };
+            let diagnostic = Diagnostic { range, message, severity, ..Default::default() };
 
             Some(diagnostic)
         })
@@ -159,16 +151,18 @@ impl TreeExtensions for tree_sitter::Tree {
 
     fn extract_snippets(&self, language: &Language, source: &str) -> Vec<Snippet> {
         let query_str = "[
-                    (param (param_name) @param_name (rust_text)? @param_rust_text)
-                    (rust_text) @rust_text
-                    (if_stmt [(open_brace) (close_brace)] @brace)
-                    (else_clause [(open_brace) (close_brace)] @brace)
-                    (for_stmt [(open_brace) (close_brace)] @brace)
-                    (while_stmt [(open_brace) (close_brace)] @brace)
-                    (child_content_) @child_content
-                    (continue_) @continue
-                    (break_) @break
-                ]";
+            (template_params (param (param_name) @param_name (rust_text) @param_type)) @template_params_block
+            (rust_text) @rust_text
+            (if_stmt [(open_brace) (close_brace)] @brace)
+            (else_clause [(open_brace) (close_brace)] @brace)
+            (for_stmt [(open_brace) (close_brace)] @brace)
+            (while_stmt [(open_brace) (close_brace)] @brace)
+            (child_content_) @child_content
+            (continue_) @continue
+            (break_) @break
+            (component_tag_parameter [(open_brace) (close_brace)] @brace)
+            (html_text) @html_text
+        ]";
 
         self.find(language, query_str, source, |x| {
             let first_cap = x.captures.first()?;
@@ -177,19 +171,42 @@ impl TreeExtensions for tree_sitter::Tree {
             let text = node.utf8_text(source.as_bytes()).ok()?.to_string();
 
             match node.kind() {
-                "param_name" => {
-                    let ty = x.captures.get(1).and_then(|rt_cap| {
-                        let rt_node = rt_cap.node;
-                        let rt_text = rt_node.utf8_text(source.as_bytes()).ok()?.to_string();
-                        Some((rt_node.byte_range(), rt_text))
-                    });
+                "template_params" => {
+                    let params_range = (range.start + 1)..range.end;
+                    let mut params_text = text[1..].to_string();
 
-                    Some(Snippet::Param {
-                        name: (range, text),
-                        ty,
-                    })
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "param" {
+                            let mut param_cursor = child.walk();
+                            for param_node in child.children(&mut param_cursor) {
+                                if param_node.kind() == "param_name" {
+                                    if let Ok(name_text) = param_node.utf8_text(source.as_bytes()) {
+                                        if name_text.starts_with("self")
+                                            && name_text[4..]
+                                                .starts_with(|c: char| c.is_whitespace())
+                                        {
+                                            let offset =
+                                                param_node.start_byte() - (range.start + 1);
+                                            params_text.replace_range(offset..offset + 4, "    ");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Some(Snippet::Params(params_range, params_text))
                 }
-                "child_content_" | "continue_" | "break_" => Some(Snippet::Expr(range, text)),
+                "html_text" => {
+                    let char_count = text.chars().count();
+                    let consumed_bytes = range.len();
+
+                    let bytes_to_delete = consumed_bytes.saturating_sub(char_count);
+
+                    Some(Snippet::Html(range, bytes_to_delete))
+                }
+                "child_content_" | "continue_" | "break_" => Some(Snippet::Directive(range, text)),
                 "rust_text" => {
                     let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
 
@@ -234,13 +251,7 @@ pub mod tests {
         let uses = tree.find_uses(&lang, source);
 
         assert_eq!(uses.len(), 2);
-        assert_eq!(
-            uses[0],
-            (
-                "components/button.rs.html".to_string(),
-                Some("Button".to_string())
-            )
-        );
+        assert_eq!(uses[0], ("components/button.rs.html".to_string(), Some("Button".to_string())));
         assert_eq!(uses[1], ("views/header.rs.html".to_string(), None));
     }
 
@@ -277,11 +288,7 @@ pub mod tests {
         let (tree, lang) = parse_rshtml(source);
         let errors = tree.find_error(&lang, source);
 
-        assert!(
-            errors.is_empty(),
-            "Valid code should produce no diagnostics: {:?}",
-            errors
-        );
+        assert!(errors.is_empty(), "Valid code should produce no diagnostics: {:?}", errors);
     }
 
     #[test]
@@ -307,11 +314,7 @@ pub mod tests {
         let params = tree.find_template_params(&lang, source);
 
         assert_eq!(params, vec!["title", "items", "map"]);
-        assert!(
-            errors.is_empty(),
-            "Generics in template_params must be valid: {:?}",
-            errors
-        );
+        assert!(errors.is_empty(), "Generics in template_params must be valid: {:?}", errors);
     }
 
     #[test]

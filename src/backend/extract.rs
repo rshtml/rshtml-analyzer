@@ -4,22 +4,21 @@ use std::{mem, ops::Range};
 pub enum Snippet {
     ExprSimple(Range<usize>, String),
     ExprParen(Range<usize>, String),
-    Expr(Range<usize>, String),
+    Directive(Range<usize>, String),
     Statement(Range<usize>, String),
-    Param {
-        name: (Range<usize>, String),
-        ty: Option<(Range<usize>, String)>,
-    },
+    Params(Range<usize>, String),
+    Html(Range<usize>, usize),
 }
 
 impl Snippet {
     pub fn start(&self) -> usize {
         match self {
             Snippet::ExprSimple(r, _)
-            | Snippet::Expr(r, _)
+            | Snippet::Directive(r, _)
             | Snippet::Statement(r, _)
-            | Snippet::ExprParen(r, _) => r.start,
-            Snippet::Param { .. } => 0,
+            | Snippet::ExprParen(r, _)
+            | Snippet::Params(r, _)
+            | Snippet::Html(r, _) => r.start,
         }
     }
 }
@@ -32,45 +31,84 @@ pub struct Extract {
 
 impl Extract {
     pub fn new(source: Vec<u8>) -> Self {
-        Self {
-            source,
-            snippets: Vec::new(),
-        }
+        Self { source, snippets: Vec::new() }
     }
 
-    pub fn extract(&mut self, original_source: &str) {
-        self.snippets
-            .sort_unstable_by_key(|b| std::cmp::Reverse(b.start()));
+    pub fn extract(&mut self) {
+        self.snippets.sort_unstable_by_key(|b| std::cmp::Reverse(b.start()));
+        self.process();
+    }
 
+    pub fn push(&mut self, snippet: Snippet) -> &mut Self {
+        self.snippets.push(snippet);
+        self
+    }
+
+    fn process(&mut self) {
         let snippets = mem::take(&mut self.snippets);
+        let mut params_range = None;
 
         for snippet in snippets {
-            if let Snippet::ExprSimple(range, expr) = snippet {
-                self.source_replace_insert(expr.as_str(), range.start - 1);
+            match snippet {
+                Snippet::Directive(range, expr) => {
+                    let expr = format!("{};", expr);
+                    self.source_replace(&expr, range.start - 1);
+                }
+                Snippet::ExprParen(range, expr) => {
+                    let expr = format!("&{};", expr);
+                    self.source_replace(&expr, range.start - 1);
+                }
+                Snippet::ExprSimple(range, expr) => {
+                    let expr = format!("&{};", expr);
+                    self.source_replace_insert(expr.as_str(), range.start - 1);
+                }
+                Snippet::Statement(range, block) => {
+                    self.source_replace(&block, range.start);
+                }
+                Snippet::Params(range, params) => {
+                    self.source_replace(&params, range.start);
+                    params_range = Some(range);
+                }
+                Snippet::Html(range, mut bytes_to_delete) => {
+                    if bytes_to_delete > 0 {
+                        let mut r = range.end;
+                        let mut w = range.end;
+
+                        while r > range.start {
+                            r -= 1;
+                            let b = self.source[r];
+                            if bytes_to_delete > 0 && b == b' ' {
+                                bytes_to_delete -= 1;
+                                continue;
+                            }
+                            w -= 1;
+                            self.source[w] = b;
+                        }
+
+                        self.source.drain(range.start..w);
+                    }
+                }
             }
         }
 
-        self.fix_utf8_column_shifts(original_source);
-    }
+        if let Some(range) = params_range {
+            let mut out = Vec::with_capacity(self.source.len() + 96);
 
-    pub fn push(&mut self, snippet: Snippet) {
-        match snippet {
-            Snippet::Expr(range, expr) => {
-                let expr = format!("&{};", expr);
-                self.source_replace(&expr, range.start - 1);
-            }
-            Snippet::ExprParen(range, expr) => {
-                let expr = format!("&{};", expr);
-                self.source_replace(&expr, range.start - 1);
-            }
-            Snippet::ExprSimple(range, expr) => {
-                let expr = format!("&{};", expr);
-                self.snippets.push(Snippet::ExprSimple(range, expr));
-            }
-            Snippet::Statement(range, block) => {
-                self.source_replace(&block, range.start);
-            }
-            Snippet::Param { .. } => {}
+            out.extend_from_slice(b"fn render(child_content: impl ::rshtml::View,");
+            out.extend_from_slice(&self.source[..range.start]);
+            out.push(b' ');
+            out.extend_from_slice(&self.source[range.start + 1..range.end]);
+            out.extend_from_slice(b"->::std::fmt::Result{");
+            out.extend_from_slice(&self.source[range.end..]);
+
+            self.source = out;
+        } else {
+            let mut out = Vec::with_capacity(self.source.len() + 64);
+            out.extend_from_slice(
+                b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{",
+            );
+            out.extend_from_slice(&self.source);
+            self.source = out;
         }
     }
 
@@ -88,22 +126,6 @@ impl Extract {
                 Some(b'\n') => self.source.insert(buf_idx, byte),
                 Some(_) => self.source[buf_idx] = byte,
                 None => self.source.push(byte),
-            }
-        }
-    }
-
-    fn fix_utf8_column_shifts(&mut self, original_source: &str) {
-        for (byte_idx, ch) in original_source.char_indices().rev() {
-            let char_len = ch.len_utf8();
-            if char_len > 1 {
-                let extra_bytes = char_len - 1;
-                if byte_idx + char_len <= self.source.len()
-                    && self.source[byte_idx..byte_idx + char_len]
-                        .iter()
-                        .all(|&b| b == b' ')
-                {
-                    self.source.drain(byte_idx + 1..byte_idx + 1 + extra_bytes);
-                }
             }
         }
     }
