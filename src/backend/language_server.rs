@@ -9,10 +9,10 @@ use crate::rust_analyzer_client::RustAnalyzerClient;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
-    CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    CompletionResponse, CompletionTextEdit, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
     InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType, OneOf, Range,
     SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
     SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
@@ -169,7 +169,7 @@ impl LanguageServer for Backend {
                 .map_err(|_| debug!("Couldn't convert file to uri: {:?}", extract_file_path))
                 .ok()?;
 
-            Some((extract_file_uri, extract_file_path))
+            Some(((extract_file_uri, 0), extract_file_path))
         }
         .await;
 
@@ -188,12 +188,11 @@ impl LanguageServer for Backend {
 
             let errors = view.tree.find_error(&self.state.language, &view.source);
 
-            Self::debug_check_source_mismatch(
-                &extract_file,
-                view.tree.extract_snippets(&self.state.language, &view.source),
-                &view.source,
-            )
-            .await;
+            // Self::debug_check_source_mismatch(
+            //     &extract_file,
+            //     &view.extract_source(&self.state.language).0,
+            // )
+            // .await;
 
             views.insert(uri_str, view);
 
@@ -201,7 +200,7 @@ impl LanguageServer for Backend {
         };
 
         let _ = async {
-            let (extract_file_uri, extract_file_path) = extract_file?;
+            let ((extract_file_uri, _), extract_file_path) = extract_file?;
 
             let extract_text = tokio::fs::read_to_string(&extract_file_path)
                 .await
@@ -300,18 +299,20 @@ impl LanguageServer for Backend {
 
                 view.update_use_directive_completion_items();
 
-                let snippets = view.tree.extract_snippets(&self.state.language, &view.source);
+                let (extract_source, params_shift) = view.extract_source(&self.state.language);
 
-                let extract_source = Self::extract_source(snippets, &view.source);
+                if let Some((_, shift)) = view.extract_file.as_mut() {
+                    *shift = params_shift;
+                }
 
-                Some((view.extract_file_uri.to_owned(), extract_source))
+                Some((view.extract_file.to_owned(), extract_source))
             } else {
                 None
             }
         };
 
         let _ = async {
-            let (extract_file_uri, extract_source) =
+            let ((extract_file_uri, _), extract_source) =
                 extract_file.and_then(|(u, s)| Some((u?, s)))?;
 
             let ra_client = self.ra_client.get()?.as_ref()?;
@@ -341,12 +342,17 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let msg = format!("Closed file: {}", params.text_document.uri);
-        self.client.log_message(MessageType::INFO, msg).await;
-        let uri_str = params.text_document.uri.to_string();
+        let uri = params.text_document.uri;
+        self.client.log_message(MessageType::INFO, format!("Closed file: {uri}")).await;
 
-        let mut views = self.state.views.write().await;
-        views.remove(&uri_str);
+        let extract_file =
+            self.state.views.write().await.remove(uri.as_str()).and_then(|view| view.extract_file);
+
+        if let Some((extract_file_uri, _)) = extract_file
+            && let Some(Some(ra_client)) = self.ra_client.get()
+        {
+            ra_client.did_close(extract_file_uri).await;
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -360,7 +366,7 @@ impl LanguageServer for Backend {
                     return None;
                 };
 
-                let Some(extract_file_uri) = &view.extract_file_uri else {
+                let Some((extract_file_uri, _)) = &view.extract_file else {
                     debug!("(DID SAVE) error while getting extract file uri");
                     return None;
                 };
@@ -491,7 +497,7 @@ impl LanguageServer for Backend {
             .and_then(|ctx| ctx.trigger_character.as_ref())
             .and_then(|s| s.chars().next());
 
-        let (mut completion_items, extract_file_uri) = {
+        let (mut completion_items, extract_file) = {
             let views = self.state.views.read().await;
             let Some(view) = views.get(&uri.to_string()) else {
                 debug!("Error while getting completion items");
@@ -503,7 +509,7 @@ impl LanguageServer for Backend {
 
             debug!("(COMPLATION) ctx: {:?}, pos: {:?}", syntax_context, position);
 
-            let extract_file_uri: Option<Url> = if syntax_context == SyntaxContext::Html {
+            let extract_file: Option<(Url, usize)> = if syntax_context == SyntaxContext::Html {
                 if let Some(tc) = trigger_char {
                     for (item_char, item) in view.completion_items.values() {
                         if *item_char == tc {
@@ -513,7 +519,7 @@ impl LanguageServer for Backend {
 
                     if tc == '@' {
                         completion_items.extend(self.state.completion_items.clone());
-                        view.extract_file_uri.to_owned()
+                        view.extract_file.to_owned()
                     } else {
                         None
                     }
@@ -557,18 +563,24 @@ impl LanguageServer for Backend {
 
                         None
                     }
-                    SyntaxContext::RustCode => view.extract_file_uri.to_owned(),
+                    SyntaxContext::RustCode => view.extract_file.to_owned(),
+                    SyntaxContext::TemplateParams => view.extract_file.to_owned(),
                     _ => None,
                 }
             };
 
-            debug!("Extract File Uri: {:?}", extract_file_uri);
-            (completion_items, extract_file_uri)
+            debug!("Extract File: {:?}", extract_file);
+            (completion_items, extract_file)
         };
 
         let ra_items = async {
             let mut ra_params = params.clone();
-            ra_params.text_document_position.text_document.uri = extract_file_uri?;
+            let (extract_file_uri, params_shift) = extract_file?;
+            ra_params.text_document_position.text_document.uri = extract_file_uri;
+
+            if ra_params.text_document_position.position.line == 0 {
+                ra_params.text_document_position.position.character += params_shift as u32;
+            }
 
             let ra_client = self.ra_client.get()?.as_ref()?;
 
@@ -585,10 +597,13 @@ impl LanguageServer for Backend {
                     .ok()
             })?;
 
-            match response {
-                CompletionResponse::Array(items) => Some(items),
-                CompletionResponse::List(completion_list) => Some(completion_list.items),
-            }
+            let mut items = match response {
+                CompletionResponse::Array(items) => items,
+                CompletionResponse::List(completion_list) => completion_list.items,
+            };
+
+            unshift(&mut items, params_shift as u32);
+            Some(items)
         }
         .await;
 
@@ -612,6 +627,19 @@ impl LanguageServer for Backend {
             is_incomplete: true,
             items: completion_items,
         })));
+
+        fn unshift(items: &mut [CompletionItem], shift: u32) {
+            for item in items {
+                if let Some(CompletionTextEdit::Edit(e)) = &mut item.text_edit {
+                    if e.range.start.line == 0 {
+                        e.range.start.character = e.range.start.character.saturating_sub(shift);
+                    }
+                    if e.range.end.line == 0 {
+                        e.range.end.character = e.range.end.character.saturating_sub(shift);
+                    }
+                }
+            }
+        }
     }
 
     async fn goto_definition(

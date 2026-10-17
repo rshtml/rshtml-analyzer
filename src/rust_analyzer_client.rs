@@ -77,10 +77,7 @@ impl RustAnalyzerClient {
 
                     if let Ok(json) = serde_json::from_slice::<Value>(&body) {
                         let id = json.get("id").cloned();
-                        let method = json
-                            .get("method")
-                            .and_then(|m| m.as_str())
-                            .map(str::to_owned);
+                        let method = json.get("method").and_then(|m| m.as_str()).map(str::to_owned);
 
                         match (id, method) {
                             (Some(id), Some(method)) => {
@@ -167,12 +164,7 @@ impl RustAnalyzerClient {
             }
         });
 
-        Some(Self {
-            stdin,
-            next_id: AtomicU64::new(1),
-            pending_requests,
-            uri_map,
-        })
+        Some(Self { stdin, next_id: AtomicU64::new(1), pending_requests, uri_map })
     }
 
     async fn send_notification(&self, method: &str, params: Value) {
@@ -217,10 +209,7 @@ impl RustAnalyzerClient {
             .write_all(lsp_msg.as_bytes())
             .await
             .unwrap_or_else(|e| error!("Failed to write to RA stdin: {}", e));
-        stdin
-            .flush()
-            .await
-            .unwrap_or_else(|e| error!("Failed to flush RA stdin: {}", e));
+        stdin.flush().await.unwrap_or_else(|e| error!("Failed to flush RA stdin: {}", e));
     }
 
     pub async fn initialize(&self, root_uri: Option<Url>) -> Value {
@@ -254,9 +243,7 @@ impl RustAnalyzerClient {
             ..Default::default()
         };
 
-        let response = self
-            .send_request("initialize", serde_json::to_value(params).unwrap())
-            .await;
+        let response = self.send_request("initialize", serde_json::to_value(params).unwrap()).await;
 
         debug!("RA Initialize process completed successfully.");
 
@@ -277,15 +264,10 @@ impl RustAnalyzerClient {
                 text,
             },
         };
-        self.send_notification(
-            "textDocument/didOpen",
-            serde_json::to_value(params).unwrap(),
-        )
-        .await;
+        self.send_notification("textDocument/didOpen", serde_json::to_value(params).unwrap()).await;
         debug!("RA open file request sent.");
 
-        self.send_request("rust-analyzer/reloadWorkspace", json!(null))
-            .await;
+        self.send_request("rust-analyzer/reloadWorkspace", json!(null)).await;
         debug!("RA workspace reload request sent");
     }
 
@@ -299,19 +281,13 @@ impl RustAnalyzerClient {
             }],
         };
 
-        self.send_notification(
-            "textDocument/didChange",
-            serde_json::to_value(params).unwrap(),
-        )
-        .await;
+        self.send_notification("textDocument/didChange", serde_json::to_value(params).unwrap())
+            .await;
     }
 
     pub async fn completion(&self, params: CompletionParams) -> Value {
         let response = self
-            .send_request(
-                "textDocument/completion",
-                serde_json::to_value(params).unwrap(),
-            )
+            .send_request("textDocument/completion", serde_json::to_value(params).unwrap())
             .await;
 
         if let Some(err) = response.get("error") {
@@ -336,19 +312,18 @@ impl RustAnalyzerClient {
         let _ = w.flush().await;
     }
 
+    pub async fn did_close(&self, uri: Url) {
+        let params = json!({ "textDocument": { "uri": uri } });
+
+        self.send_notification("textDocument/didClose", params).await;
+    }
+
     #[allow(dead_code)]
     pub async fn analyzer_status(&self, uri: Url) -> String {
         let params = serde_json::json!({ "textDocument": { "uri": uri } });
 
-        let response = self
-            .send_request("rust-analyzer/analyzerStatus", params)
-            .await;
+        let response = self.send_request("rust-analyzer/analyzerStatus", params).await;
 
-        response
-            .get("result")
-            .unwrap_or(&response)
-            .as_str()
-            .unwrap_or_default()
-            .to_string()
+        response.get("result").unwrap_or(&response).as_str().unwrap_or_default().to_string()
     }
 }

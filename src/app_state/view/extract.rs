@@ -27,11 +27,12 @@ impl Snippet {
 pub struct Extract {
     pub snippets: Vec<Snippet>,
     pub source: Vec<u8>,
+    pub params_shift: usize,
 }
 
 impl Extract {
     pub fn new(source: Vec<u8>) -> Self {
-        Self { source, snippets: Vec::new() }
+        Self { source, snippets: Vec::new(), params_shift: 0 }
     }
 
     pub fn extract(&mut self) {
@@ -47,6 +48,9 @@ impl Extract {
     fn process(&mut self) {
         let snippets = mem::take(&mut self.snippets);
         let mut params_range = None;
+        const PREFIX: &[u8] = b"fn render(child_content: impl ::rshtml::View,";
+        const PREFIX_NO_PARAMS: &[u8] =
+            b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{";
 
         for snippet in snippets {
             match snippet {
@@ -92,9 +96,11 @@ impl Extract {
         }
 
         if let Some(range) = params_range {
+            self.params_shift = PREFIX.len();
+
             let mut out = Vec::with_capacity(self.source.len() + 96);
 
-            out.extend_from_slice(b"fn render(child_content: impl ::rshtml::View,");
+            out.extend_from_slice(PREFIX);
             out.extend_from_slice(&self.source[..range.start]);
             out.push(b' ');
             out.extend_from_slice(&self.source[range.start + 1..range.end]);
@@ -103,10 +109,10 @@ impl Extract {
 
             self.source = out;
         } else {
+            self.params_shift = PREFIX_NO_PARAMS.len();
+
             let mut out = Vec::with_capacity(self.source.len() + 64);
-            out.extend_from_slice(
-                b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{",
-            );
+            out.extend_from_slice(PREFIX_NO_PARAMS);
             out.extend_from_slice(&self.source);
             self.source = out;
         }

@@ -1,9 +1,8 @@
+use crate::app_state::view::Snippet;
 use tower_lsp::lsp_types;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 use tracing::error;
 use tree_sitter::{Language, Query, QueryCursor, QueryMatch, Range, StreamingIterator};
-
-use crate::backend::extract::Snippet;
 
 pub trait TreeExtensions {
     const STRING_TRIMS: &'_ [char] = &[' ', '\'', '"'];

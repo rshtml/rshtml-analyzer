@@ -1,4 +1,3 @@
-mod extract;
 mod language_server;
 pub mod navigation_target;
 pub mod semantic_tokens_builder;
@@ -10,7 +9,6 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use crate::app_state::AppState;
-use crate::backend::extract::{Extract, Snippet};
 use crate::rust_analyzer_client::RustAnalyzerClient;
 use tokio::fs;
 use tokio::sync::OnceCell;
@@ -157,36 +155,12 @@ impl Backend {
         Ok(target_path)
     }
 
-    pub fn extract_source(snippets: Vec<Snippet>, original_source: &str) -> String {
-        let cleaned_source = original_source
-            .as_bytes()
-            .iter()
-            .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
-            .collect::<Vec<u8>>();
-
-        let mut extract = Extract::new(cleaned_source);
-        for snippet in snippets {
-            extract.push(snippet);
-        }
-        extract.extract();
-
-        let extract_source = format!(
-            "{1} {0}",
-            " Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
-            String::from_utf8_lossy(&extract.source)
-        );
-
-        extract_source
-    }
-
     #[allow(dead_code)]
     async fn debug_check_source_mismatch(
-        extract_file: &Option<(Url, PathBuf)>,
-        snippets: Vec<Snippet>,
-        source: &str,
+        extract_file: &Option<((Url, usize), PathBuf)>,
+        extract_source: &str,
     ) {
         if let Some((_, extract_file_path)) = extract_file {
-            let extract_source = Self::extract_source(snippets, source);
             let Ok(extract_text) = tokio::fs::read_to_string(&extract_file_path).await else {
                 return;
             };
