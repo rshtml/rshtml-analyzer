@@ -1,14 +1,13 @@
 mod extract;
 
+use crate::backend::tree_extensions::TreeExtensions;
 use extract::Extract;
-pub use extract::Snippet;
+pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
 use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url,
 };
 use tree_sitter::{Language, Tree};
-
-use crate::backend::tree_extensions::TreeExtensions;
 
 pub struct View {
     pub source: String,
@@ -18,18 +17,13 @@ pub struct View {
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
     pub semantic_tokens_version: u64,
-    pub extract_file: Option<(Url, usize)>,
+    pub extract_file: Option<Url>,
 
     pub version: usize,
 }
 
 impl View {
-    pub fn new(
-        source: String,
-        tree: Tree,
-        version: usize,
-        extract_file: Option<(Url, usize)>,
-    ) -> Self {
+    pub fn new(source: String, tree: Tree, version: usize, extract_file: Option<Url>) -> Self {
         Self {
             source,
             tree,
@@ -145,7 +139,7 @@ impl View {
         }
     }
 
-    pub fn extract_source(&self, language: &Language) -> (String, usize) {
+    pub fn extract_source(&self, language: &Language) -> String {
         let snippets = self.tree.extract_snippets(language, &self.source);
 
         let cleaned_source = self
@@ -167,7 +161,7 @@ impl View {
             String::from_utf8_lossy(&extract.source)
         );
 
-        (extract_source, extract.params_shift)
+        extract_source
     }
 }
 

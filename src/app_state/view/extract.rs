@@ -23,16 +23,25 @@ impl Snippet {
     }
 }
 
+const PREFIX: &[u8] = b"fn render(child_content: impl ::rshtml::View,";
+const PREFIX_NO_PARAMS: &[u8] =
+    b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{";
+const POSTFIX: &[u8] = b"->::std::fmt::Result{";
+
+const _: () = assert!(PREFIX_NO_PARAMS.len() == FIRST_LINE_SHIFT);
+
+pub const PARAMS_SHIFT: usize = PREFIX.len();
+pub const FIRST_LINE_SHIFT: usize = PREFIX.len() + POSTFIX.len();
+
 #[derive(Debug, Default, Clone)]
 pub struct Extract {
     pub snippets: Vec<Snippet>,
     pub source: Vec<u8>,
-    pub params_shift: usize,
 }
 
 impl Extract {
     pub fn new(source: Vec<u8>) -> Self {
-        Self { source, snippets: Vec::new(), params_shift: 0 }
+        Self { source, snippets: Vec::new() }
     }
 
     pub fn extract(&mut self) {
@@ -48,9 +57,6 @@ impl Extract {
     fn process(&mut self) {
         let snippets = mem::take(&mut self.snippets);
         let mut params_range = None;
-        const PREFIX: &[u8] = b"fn render(child_content: impl ::rshtml::View,";
-        const PREFIX_NO_PARAMS: &[u8] =
-            b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{";
 
         for snippet in snippets {
             match snippet {
@@ -96,21 +102,17 @@ impl Extract {
         }
 
         if let Some(range) = params_range {
-            self.params_shift = PREFIX.len();
-
-            let mut out = Vec::with_capacity(self.source.len() + 96);
+            let mut out = Vec::with_capacity(self.source.len() + FIRST_LINE_SHIFT);
 
             out.extend_from_slice(PREFIX);
             out.extend_from_slice(&self.source[..range.start]);
             out.push(b' ');
             out.extend_from_slice(&self.source[range.start + 1..range.end]);
-            out.extend_from_slice(b"->::std::fmt::Result{");
+            out.extend_from_slice(POSTFIX);
             out.extend_from_slice(&self.source[range.end..]);
 
             self.source = out;
         } else {
-            self.params_shift = PREFIX_NO_PARAMS.len();
-
             let mut out = Vec::with_capacity(self.source.len() + 64);
             out.extend_from_slice(PREFIX_NO_PARAMS);
             out.extend_from_slice(&self.source);

@@ -179,17 +179,13 @@ impl TreeExtensions for tree_sitter::Tree {
                         if child.kind() == "param" {
                             let mut param_cursor = child.walk();
                             for param_node in child.children(&mut param_cursor) {
-                                if param_node.kind() == "param_name" {
-                                    if let Ok(name_text) = param_node.utf8_text(source.as_bytes()) {
-                                        if name_text.starts_with("self")
-                                            && name_text[4..]
-                                                .starts_with(|c: char| c.is_whitespace())
-                                        {
-                                            let offset =
-                                                param_node.start_byte() - (range.start + 1);
-                                            params_text.replace_range(offset..offset + 4, "    ");
-                                        }
-                                    }
+                                if param_node.kind() == "param_name"
+                                    && let Ok(name_text) = param_node.utf8_text(source.as_bytes())
+                                    && name_text.starts_with("self")
+                                    && name_text[4..].starts_with(|c: char| c.is_whitespace())
+                                {
+                                    let offset = param_node.start_byte() - (range.start + 1);
+                                    params_text.replace_range(offset..offset + 4, "    ");
                                 }
                             }
                         }

@@ -157,7 +157,7 @@ impl Backend {
 
     #[allow(dead_code)]
     async fn debug_check_source_mismatch(
-        extract_file: &Option<((Url, usize), PathBuf)>,
+        extract_file: &Option<(Url, PathBuf)>,
         extract_source: &str,
     ) {
         if let Some((_, extract_file_path)) = extract_file {
