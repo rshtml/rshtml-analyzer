@@ -73,7 +73,7 @@ impl TreeExtensions for tree_sitter::Tree {
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)> {
         let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (component_tag_identifier) @use_alias)?)";
         self.find(language, query_str, source, |x| {
-            let mut captures = x.captures.iter();
+            let mut captures = x.captures().iter();
             let use_path = captures
                 .next()?
                 .node
@@ -99,8 +99,8 @@ impl TreeExtensions for tree_sitter::Tree {
     fn find_template_params(&self, language: &Language, source: &str) -> Vec<String> {
         let query_str = "[(template_params (param (param_name) @param_name))]";
         self.find(language, query_str, source, |x| {
-            let mut param_names = Vec::with_capacity(x.captures.len());
-            for c in x.captures {
+            let mut param_names = Vec::with_capacity(x.captures().len());
+            for c in x.captures() {
                 param_names.push(
                     c.node
                         .utf8_text(source.as_bytes())
@@ -121,7 +121,7 @@ impl TreeExtensions for tree_sitter::Tree {
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic> {
         let query_str = "[(ERROR) @error (MISSING) @missing]";
         self.find(language, query_str, source, |x| {
-            let node = x.captures.first()?.node;
+            let node = x.captures().first()?.node;
 
             let range = if node.is_missing() {
                 node.parent().map_or(node.range(), |parent| parent.range())
@@ -164,7 +164,7 @@ impl TreeExtensions for tree_sitter::Tree {
         ]";
 
         self.find(language, query_str, source, |x| {
-            let first_cap = x.captures.first()?;
+            let first_cap = x.captures().first()?;
             let node = first_cap.node;
             let range = node.byte_range();
             let text = node.utf8_text(source.as_bytes()).ok()?.to_string();

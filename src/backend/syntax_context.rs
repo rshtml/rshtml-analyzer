@@ -105,12 +105,10 @@ impl SyntaxContext {
                     if byte_offset > 0
                         && let Some(prev) =
                             root.descendant_for_byte_range(byte_offset - 1, byte_offset - 1)
+                        && (prev.kind() == "rust_expr_simple"
+                            || prev.parent().is_some_and(|p| p.kind() == "rust_expr_simple"))
                     {
-                        if prev.kind() == "rust_expr_simple"
-                            || prev.parent().is_some_and(|p| p.kind() == "rust_expr_simple")
-                        {
-                            return Self::RustCode;
-                        }
+                        return Self::RustCode;
                     }
                 }
             }

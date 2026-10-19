@@ -55,12 +55,9 @@ impl Highlight {
     ) -> Result<Vec<SemanticToken>, Error> {
         if let Ok(mut highlighter) = self.highlighter.lock() {
             let highlight_events = highlighter
-                .highlight(
-                    &self.highlight_config,
-                    source.as_bytes(),
-                    None,
-                    |lang_name| self.highlight_injects.get(lang_name),
-                )
+                .highlight(&self.highlight_config, source.as_bytes(), None, None, |lang_name| {
+                    self.highlight_injects.get(lang_name)
+                })
                 .map_err(|e| {
                     error!("Error during highlighting: {}", e);
                     Error::new(ErrorCode::InternalError)
@@ -82,9 +79,8 @@ impl Highlight {
         let mut builder = SemanticTokensBuilder::new();
         let mut highlight_stack: Vec<tree_sitter_highlight::Highlight> = Vec::new();
 
-        let line_starts: Vec<usize> = std::iter::once(0)
-            .chain(source.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
+        let line_starts: Vec<usize> =
+            std::iter::once(0).chain(source.match_indices('\n').map(|(i, _)| i + 1)).collect();
 
         for highlight_event in highlight_events {
             if let Ok(highlight_event) = highlight_event {
@@ -179,10 +175,7 @@ impl Highlight {
             _ => SemanticTokenType::VARIABLE,
         };
 
-        self.token_type_map
-            .get(&lsp_type_name)
-            .copied()
-            .unwrap_or(1)
+        self.token_type_map.get(&lsp_type_name).copied().unwrap_or(1)
     }
 
     fn byte_to_line_col(
@@ -208,11 +201,8 @@ impl Highlight {
     ) -> Vec<SemanticTokensEdit> {
         const TOKEN_LEN: usize = 5;
 
-        let common_prefix_len = old_tokens
-            .iter()
-            .zip(new_tokens.iter())
-            .take_while(|(old, new)| old == new)
-            .count();
+        let common_prefix_len =
+            old_tokens.iter().zip(new_tokens.iter()).take_while(|(old, new)| old == new).count();
 
         if common_prefix_len == old_tokens.len() && common_prefix_len == new_tokens.len() {
             return vec![];
@@ -230,16 +220,8 @@ impl Highlight {
             ((old_tokens.len() - common_prefix_len - common_suffix_len) * TOKEN_LEN) as u32;
         let new_data_slice = &new_tokens[common_prefix_len..(new_tokens.len() - common_suffix_len)];
 
-        let data = if new_data_slice.is_empty() {
-            None
-        } else {
-            Some(new_data_slice.to_vec())
-        };
+        let data = if new_data_slice.is_empty() { None } else { Some(new_data_slice.to_vec()) };
 
-        vec![SemanticTokensEdit {
-            start,
-            delete_count,
-            data,
-        }]
+        vec![SemanticTokensEdit { start, delete_count, data }]
     }
 }
