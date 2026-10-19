@@ -23,11 +23,6 @@ impl Default for Workspace {
 
 impl Workspace {
     pub fn load(&mut self, root: &Path) -> Result<(), String> {
-        let mut new_workspace = Self {
-            root: root.to_path_buf(),
-            ..Default::default()
-        };
-
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).map_err(|e| e.to_string())?;
         let cargo_toml: Value = toml::from_str(&cargo_toml).map_err(|e| e.to_string())?;
 
@@ -45,6 +40,8 @@ impl Workspace {
                     .collect::<Vec<_>>()
             });
 
+        let mut members: Vec<Member> = Vec::new();
+
         if let Some(member_paths) = member_paths {
             for member_path in member_paths {
                 debug!("MEMBER PATH: {}", member_path.to_str().unwrap());
@@ -52,7 +49,7 @@ impl Workspace {
                     path: member_path.clone(),
                 };
 
-                new_workspace.members.push(member);
+                members.push(member);
             }
         } else {
             let member = Member {
@@ -61,12 +58,25 @@ impl Workspace {
 
             debug!("MEMBER PATH: {}", member.path.to_string_lossy().to_string());
 
-            new_workspace.members.push(member);
+            members.push(member);
         }
 
-        self.root = new_workspace.root;
-        self.members = new_workspace.members;
+        self.members = members;
 
         Ok(())
+    }
+
+    pub fn find_root_and_relative_path(&self, path: &Path) -> (PathBuf, PathBuf) {
+        for member in &self.members {
+            if let Ok(rel_path) = path.strip_prefix(&member.path) {
+                return (member.path.to_owned(), rel_path.to_path_buf());
+            }
+        }
+
+        if let Ok(rel_path) = path.strip_prefix(&self.root) {
+            return (self.root.to_owned(), rel_path.to_path_buf());
+        }
+
+        (self.root.to_owned(), path.to_path_buf())
     }
 }

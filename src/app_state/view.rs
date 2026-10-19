@@ -1,6 +1,13 @@
+mod extract;
+
+use crate::backend::tree_extensions::TreeExtensions;
+use extract::Extract;
+pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
 use std::collections::{HashMap, HashSet};
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens};
-use tree_sitter::Tree;
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url,
+};
+use tree_sitter::{Language, Tree};
 
 pub struct View {
     pub source: String,
@@ -10,12 +17,13 @@ pub struct View {
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub semantic_tokens: SemanticTokens,
     pub semantic_tokens_version: u64,
+    pub extract_file: Option<Url>,
 
     pub version: usize,
 }
 
 impl View {
-    pub fn new(source: String, tree: Tree, version: usize) -> Self {
+    pub fn new(source: String, tree: Tree, version: usize, extract_file: Option<Url>) -> Self {
         Self {
             source,
             tree,
@@ -24,6 +32,7 @@ impl View {
             completion_items: HashMap::new(),
             semantic_tokens: SemanticTokens::default(),
             semantic_tokens_version: 0,
+            extract_file,
             version,
         }
     }
@@ -124,12 +133,35 @@ impl View {
             .retain(|name, _| current_names_and_params.iter().any(|(n, _)| n == name));
 
         for (name, params) in current_names_and_params {
-            self.completion_items
-                .entry(name)
-                .or_insert_with_key(|use_name| {
-                    Self::use_directive_completion_item(use_name, &params)
-                });
+            self.completion_items.entry(name).or_insert_with_key(|use_name| {
+                Self::use_directive_completion_item(use_name, &params)
+            });
         }
+    }
+
+    pub fn extract_source(&self, language: &Language) -> String {
+        let snippets = self.tree.extract_snippets(language, &self.source);
+
+        let cleaned_source = self
+            .source
+            .as_bytes()
+            .iter()
+            .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
+            .collect::<Vec<u8>>();
+
+        let mut extract = Extract::new(cleaned_source);
+        for snippet in snippets {
+            extract.push(snippet);
+        }
+        extract.extract();
+
+        let extract_source = format!(
+            "{1} {0}",
+            " Ok(()) } use super::*;use ::rshtml::{Render, View};use std::fmt::Display;",
+            String::from_utf8_lossy(&extract.source)
+        );
+
+        extract_source
     }
 }
 
@@ -147,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_use_directives_names_and_params() {
-        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        let mut view = View::new("".to_string(), dummy_tree(), 1, None);
         view.use_directives = vec![
             (
                 "components/button.rs.html".to_string(),
@@ -165,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_sync_use_directives() {
-        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        let mut view = View::new("".to_string(), dummy_tree(), 1, None);
 
         // Initial sync
         let new_uses = view.sync_use_directives(vec![(
@@ -198,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_completion_items_generation() {
-        let mut view = View::new("".to_string(), dummy_tree(), 1);
+        let mut view = View::new("".to_string(), dummy_tree(), 1, None);
         view.use_directives = vec![(
             "components/button.rs.html".to_string(),
             Some("Button".to_string()),

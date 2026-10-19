@@ -5,22 +5,27 @@ mod server_capabilities;
 pub mod syntax_context;
 pub mod tree_extensions;
 
+use std::io;
+use std::path::{Component, Path, PathBuf};
+
 use crate::app_state::AppState;
+use crate::rust_analyzer_client::RustAnalyzerClient;
+use tokio::fs;
+use tokio::sync::OnceCell;
 use tower_lsp::Client;
-use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent};
+use tower_lsp::lsp_types::{Position, TextDocumentContentChangeEvent, Url};
+use tracing::debug;
 use tree_sitter::{Point, Tree};
 
 pub struct Backend {
     pub client: Client,
     pub state: AppState,
+    ra_client: OnceCell<Option<RustAnalyzerClient>>,
 }
 
 impl Backend {
     pub fn new(client: Client, app_state: AppState) -> Self {
-        Self {
-            client,
-            state: app_state,
-        }
+        Self { client, state: app_state, ra_client: OnceCell::new() }
     }
 
     pub fn position_to_byte_offset(text: &str, position: Position) -> usize {
@@ -48,10 +53,8 @@ impl Backend {
     }
 
     pub fn calculate_new_end_point(start_pos: Position, text: &str) -> Point {
-        let mut new_pos = Point {
-            row: start_pos.line as usize,
-            column: start_pos.character as usize,
-        };
+        let mut new_pos =
+            Point { row: start_pos.line as usize, column: start_pos.character as usize };
 
         for (i, line) in text.lines().enumerate() {
             if i == 0 {
@@ -100,6 +103,90 @@ impl Backend {
             }
         }
     }
+
+    pub async fn generate_extract_file_path(
+        root_path: &Path,
+        relative_path: &Path,
+    ) -> io::Result<PathBuf> {
+        let manifest_dir = fs::canonicalize(root_path)
+            .await
+            .map_err(|e| io::Error::new(e.kind(), format!("{root_path:?}: {e}")))?;
+
+        let mut target_path = manifest_dir.join(".rshtml");
+
+        let absolute_path = fs::canonicalize(manifest_dir.join(relative_path))
+            .await
+            .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", relative_path.display())))?;
+
+        if let Ok(rel_path) = absolute_path.strip_prefix(&manifest_dir) {
+            target_path.push(rel_path);
+        } else {
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+
+            target_path.push("__ext__");
+
+            for component in absolute_path.components() {
+                match component {
+                    Component::Normal(c) => {
+                        target_path.push(c);
+                    }
+                    Component::Prefix(prefix) => {
+                        let bytes = prefix.as_os_str().as_encoded_bytes();
+                        let mut hex = String::with_capacity(bytes.len() * 2 + 4);
+                        hex.push_str("__");
+                        for b in bytes {
+                            hex.push(HEX[(b >> 4) as usize] as char);
+                            hex.push(HEX[(b & 0xf) as usize] as char);
+                        }
+                        hex.push_str("__");
+
+                        target_path.push(hex);
+                    }
+                    Component::CurDir | Component::ParentDir | Component::RootDir => {}
+                }
+            }
+        }
+
+        // .rs.html -> .rs
+        if target_path.extension().is_some_and(|e| e == "html") {
+            target_path.set_extension("");
+        }
+
+        Ok(target_path)
+    }
+
+    #[allow(dead_code)]
+    async fn debug_check_source_mismatch(
+        extract_file: &Option<(Url, PathBuf)>,
+        extract_source: &str,
+    ) {
+        if let Some((_, extract_file_path)) = extract_file {
+            let Ok(extract_text) = tokio::fs::read_to_string(&extract_file_path).await else {
+                return;
+            };
+
+            if extract_source != extract_text {
+                debug!("(DEBUG CHECK) SOURCES MISMATCH! Analyzing differences...");
+                let extracted_lines: Vec<&str> = extract_source.lines().collect();
+                let extract_lines: Vec<&str> = extract_text.lines().collect();
+                let max_lines = std::cmp::max(extracted_lines.len(), extract_lines.len());
+
+                for i in 0..max_lines {
+                    let e_line = extracted_lines.get(i).unwrap_or(&"<EOF>");
+                    let m_line = extract_lines.get(i).unwrap_or(&"<EOF>");
+
+                    if e_line != m_line {
+                        debug!("Difference found at Line {}:", i + 1);
+                        debug!("  Extract (RAM): {:?}", e_line);
+                        debug!("  Extract (Disk)  : {:?}", m_line);
+                        continue;
+                    }
+                }
+            } else {
+                debug!("(DEBUG CHECK) sources matched perfectly");
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -112,30 +199,15 @@ mod tests {
     fn test_position_to_byte_offset_ascii() {
         let text = "hello\nworld\nrshtml";
         // Line 0, char 0 -> 0
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 0)),
-            0
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 0)), 0);
         // Line 0, char 5 -> 5 ('\n')
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 5)),
-            5
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 5)), 5);
         // Line 1, char 0 -> 6 ('w')
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(1, 0)),
-            6
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(1, 0)), 6);
         // Line 2, char 6 -> 18 (end of file)
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(2, 6)),
-            18
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(2, 6)), 18);
         // Position past the end falls back to text.len()
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(10, 0)),
-            18
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(10, 0)), 18);
     }
 
     #[test]
@@ -144,25 +216,13 @@ mod tests {
         // 'á' is 2 bytes in UTF-8, 1 UTF-16 code unit
         let text = "🦀 á";
         // At start
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 0)),
-            0
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 0)), 0);
         // After '🦀' (2 UTF-16 code units) -> byte offset 4
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 2)),
-            4
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 2)), 4);
         // After space (2 + 1 = 3 UTF-16 units) -> byte offset 5
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 3)),
-            5
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 3)), 5);
         // After 'á' (3 + 1 = 4 UTF-16 units) -> byte offset 7 (end of text)
-        assert_eq!(
-            Backend::position_to_byte_offset(text, Position::new(0, 4)),
-            7
-        );
+        assert_eq!(Backend::position_to_byte_offset(text, Position::new(0, 4)), 7);
     }
 
     #[test]
@@ -192,10 +252,7 @@ mod tests {
 
         // Replace "hello" with "world!" (range: line 0, col 5 to line 0, col 10)
         let change = TextDocumentContentChangeEvent {
-            range: Some(Range {
-                start: Position::new(0, 5),
-                end: Position::new(0, 10),
-            }),
+            range: Some(Range { start: Position::new(0, 5), end: Position::new(0, 10) }),
             range_length: None,
             text: "world!".to_string(),
         };

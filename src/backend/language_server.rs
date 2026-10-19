@@ -1,21 +1,23 @@
-use crate::app_state::view::View;
+use crate::app_state::view::{FIRST_LINE_SHIFT, PARAMS_SHIFT, View};
 use crate::backend::Backend;
 use crate::backend::navigation_target::NavigationTarget;
 use crate::backend::server_capabilities::{semantic_tokens_capabilities, workspace_capabilities};
 use crate::backend::syntax_context::SyntaxContext;
 use crate::backend::tree_extensions::TreeExtensions;
 use crate::consts;
+use crate::rust_analyzer_client::RustAnalyzerClient;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
-    CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, InsertTextFormat, Location,
-    MarkupContent, MarkupKind, MessageType, OneOf, Range, SemanticTokens, SemanticTokensDelta,
-    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
-    SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
+    CompletionResponse, CompletionTextEdit, DidChangeTextDocumentParams,
+    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType, OneOf, Range,
+    SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
+    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
+    SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentIdentifier,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -23,16 +25,15 @@ use tracing::{debug, error};
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult, Error> {
-        debug!(
-            "The Initialize request has been received (build: {})...",
-            consts::BUILD_MODE
-        );
+        debug!("The Initialize request has been received (build: {})...", consts::BUILD_MODE);
 
         let workspace_root_path = params
             .workspace_folders
             .as_ref()
             .and_then(|folders| folders.first())
             .and_then(|folder| folder.uri.to_file_path().ok());
+
+        debug!("workspace root path: {:?}", workspace_root_path);
 
         if let Some(path) = workspace_root_path {
             debug!("Workspace root path: {:?}", path);
@@ -41,10 +42,21 @@ impl LanguageServer for Backend {
                 .await;
 
             let mut workspace = self.state.workspace.write().await;
+            workspace.root = path.to_path_buf();
             workspace.load(&path).unwrap_or_else(|e| {
-                debug!("Workspace couldn't load: {}", e);
+                debug!("Workspace couldn't load: {}, operating in single-file mode", e);
             });
         }
+
+        let ra_option = RustAnalyzerClient::new(self.client.clone()).await;
+        if let Some(ra) = &ra_option {
+            ra.initialize(params.root_uri).await;
+            ra.initialized().await;
+        }
+        let _ = self
+            .ra_client
+            .set(ra_option)
+            .inspect_err(|e| debug!("RA client could not be set: {e}"));
 
         debug!("Sending an initialize response.");
         Ok(InitializeResult {
@@ -55,7 +67,14 @@ impl LanguageServer for Backend {
                 semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec!["@".to_string(), "<".to_string()]),
+                    trigger_characters: Some(vec![
+                        "@".into(),
+                        "<".into(),
+                        ":".into(),
+                        ".".into(),
+                        "'".into(),
+                        "(".into(),
+                    ]),
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
@@ -65,11 +84,7 @@ impl LanguageServer for Backend {
             },
             server_info: Some(ServerInfo {
                 name: "rshtml-analyzer".to_string(),
-                version: Some(format!(
-                    "{} ({})",
-                    env!("CARGO_PKG_VERSION"),
-                    consts::BUILD_MODE
-                )),
+                version: Some(format!("{} ({})", env!("CARGO_PKG_VERSION"), consts::BUILD_MODE)),
             }),
         })
     }
@@ -82,16 +97,11 @@ impl LanguageServer for Backend {
         );
 
         if cfg!(debug_assertions) {
-            self.client
-                .show_message(MessageType::INFO, &version_msg)
-                .await;
+            self.client.show_message(MessageType::INFO, &version_msg).await;
         }
 
         self.client
-            .log_message(
-                MessageType::INFO,
-                format!("{version_msg} Handshake completed."),
-            )
+            .log_message(MessageType::INFO, format!("{version_msg} Handshake completed."))
             .await;
     }
 
@@ -100,8 +110,9 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let msg = format!("Opened file: {}", &params.text_document.uri);
-        self.client.log_message(MessageType::INFO, msg).await;
+        let msg = format!("Opened file: {}", params.text_document.uri);
+        self.client.log_message(MessageType::INFO, &msg).await;
+        debug!(msg);
 
         let uri_str = params.text_document.uri.to_string();
         let text = params.text_document.text;
@@ -136,8 +147,39 @@ impl LanguageServer for Backend {
         let template_params = tree.find_template_params(&self.state.language, &text);
         debug!("Template params: {:?}", template_params);
 
+        let extract_file = async {
+            let path = params
+                .text_document
+                .uri
+                .to_file_path()
+                .map_err(|_| {
+                    debug!("invalid uri: {}", &params.text_document.uri);
+                })
+                .ok()?;
+
+            let workspace = self.state.workspace.read().await;
+            let (root_path, relative_path) = workspace.find_root_and_relative_path(&path);
+
+            let extract_file_path = Self::generate_extract_file_path(&root_path, &relative_path)
+                .await
+                .map_err(|e| debug!("generate_module_path error: {}", e))
+                .ok()?;
+
+            let extract_file_uri = Url::from_file_path(&extract_file_path)
+                .map_err(|_| debug!("Couldn't convert file to uri: {:?}", extract_file_path))
+                .ok()?;
+
+            Some((extract_file_uri, extract_file_path))
+        }
+        .await;
+
         let errors = {
-            let mut view = View::new(text, tree, params.text_document.version as usize);
+            let mut view = View::new(
+                text.to_owned(),
+                tree.to_owned(),
+                params.text_document.version as usize,
+                extract_file.as_ref().map(|x| x.0.clone()),
+            );
             view.use_directives = use_directives_with_params;
             view.create_use_directive_completion_items();
             view.template_params = template_params;
@@ -146,10 +188,45 @@ impl LanguageServer for Backend {
 
             let errors = view.tree.find_error(&self.state.language, &view.source);
 
+            if cfg!(debug_assertions) {
+                Self::debug_check_source_mismatch(
+                    &extract_file,
+                    &view.extract_source(&self.state.language),
+                )
+                .await;
+            }
+
             views.insert(uri_str, view);
 
             errors
         };
+
+        let _ = async {
+            let (extract_file_uri, extract_file_path) = extract_file?;
+
+            let extract_text = tokio::fs::read_to_string(&extract_file_path)
+                .await
+                .inspect_err(|e| {
+                    debug!("Failed to read file at '{}': {}", extract_file_path.display(), e)
+                })
+                .ok()?;
+
+            let ra_client = self.ra_client.get()?.as_ref()?;
+
+            ra_client
+                .uri_map
+                .lock()
+                .await
+                .insert(extract_file_uri.clone(), params.text_document.uri.clone());
+
+            ra_client.did_open(extract_file_uri, extract_text).await;
+
+            // let status = ra_client.analyzer_status(extract_file_uri).await;
+            // debug!("(DEBUG STATUS) {status}");
+
+            Some(())
+        }
+        .await;
 
         self.client
             .publish_diagnostics(
@@ -161,7 +238,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let msg = format!("Changed file: {}", &params.text_document.uri);
+        let msg = format!("Changed file: {}", params.text_document.uri);
         self.client.log_message(MessageType::INFO, msg).await;
 
         let uri_str = params.text_document.uri.to_string();
@@ -195,10 +272,7 @@ impl LanguageServer for Backend {
 
                 view.template_params = template_params;
 
-                (
-                    new_uses,
-                    view.tree.find_error(&self.state.language, &view.source),
-                )
+                (new_uses, view.tree.find_error(&self.state.language, &view.source))
             } else {
                 error!("view {uri_str} not found");
                 return;
@@ -216,7 +290,7 @@ impl LanguageServer for Backend {
             new_uses_params.push((id, use_params));
         }
 
-        {
+        let extract_file = {
             let mut views = self.state.views.write().await;
             if let Some(view) = views.get_mut(&uri_str) {
                 for (id, use_params) in new_uses_params {
@@ -226,8 +300,35 @@ impl LanguageServer for Backend {
                 }
 
                 view.update_use_directive_completion_items();
+
+                let extract_source = view.extract_source(&self.state.language);
+
+                Some((view.extract_file.to_owned(), extract_source))
+            } else {
+                None
             }
+        };
+
+        let _ = async {
+            let (extract_file_uri, extract_source) =
+                extract_file.and_then(|(u, s)| Some((u?, s)))?;
+
+            let ra_client = self.ra_client.get()?.as_ref()?;
+
+            debug!(
+                "(DID CHANGE) RA did change will send, uri: {} version: {}",
+                extract_file_uri, params.text_document.version
+            );
+
+            ra_client
+                .did_change(extract_file_uri, params.text_document.version, extract_source)
+                .await;
+
+            debug!("(DID CHANGE) RA did change sent",);
+
+            Some(())
         }
+        .await;
 
         self.client
             .publish_diagnostics(
@@ -239,12 +340,50 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let msg = format!("Closed file: {}", &params.text_document.uri);
-        self.client.log_message(MessageType::INFO, msg).await;
-        let uri_str = params.text_document.uri.to_string();
+        let uri = params.text_document.uri;
+        self.client.log_message(MessageType::INFO, format!("Closed file: {uri}")).await;
 
-        let mut views = self.state.views.write().await;
-        views.remove(&uri_str);
+        let extract_file =
+            self.state.views.write().await.remove(uri.as_str()).and_then(|view| view.extract_file);
+
+        if let Some(extract_file_uri) = extract_file
+            && let Some(Some(ra_client)) = self.ra_client.get()
+        {
+            ra_client.did_close(extract_file_uri).await;
+        }
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        debug!("(DID SAVE) triggered for file: {}", params.text_document.uri);
+
+        let _ = async {
+            let extract_file_uri = {
+                let views = self.state.views.read().await;
+                let Some(view) = views.get(&params.text_document.uri.to_string()) else {
+                    debug!("(DID SAVE) error while getting completion items");
+                    return None;
+                };
+
+                let Some(extract_file_uri) = &view.extract_file else {
+                    debug!("(DID SAVE) error while getting extract file uri");
+                    return None;
+                };
+
+                extract_file_uri.to_owned()
+            };
+
+            let params = DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: extract_file_uri },
+                text: None,
+            };
+
+            let ra_client = self.ra_client.get()?.as_ref()?;
+            ra_client.did_save(params).await;
+            debug!("(DID SAVE) RA save request sent");
+
+            Some(())
+        }
+        .await;
     }
 
     async fn semantic_tokens_full(
@@ -302,11 +441,7 @@ impl LanguageServer for Backend {
             let tokens_diff =
                 highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
 
-            debug!(
-                "Semantic Tokens Delta: {:?} {:?}",
-                tokens_diff.len(),
-                tokens_diff
-            );
+            debug!("Semantic Tokens Delta: {:?} {:?}", tokens_diff.len(), tokens_diff);
 
             view.semantic_tokens_version += 1;
             view.semantic_tokens = SemanticTokens {
@@ -314,12 +449,10 @@ impl LanguageServer for Backend {
                 data: tokens.clone(),
             };
 
-            return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(
-                SemanticTokensDelta {
-                    result_id: Some(view.semantic_tokens_version.to_string()),
-                    edits: tokens_diff,
-                },
-            )));
+            return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
+                result_id: Some(view.semantic_tokens_version.to_string()),
+                edits: tokens_diff,
+            })));
         }
 
         Ok(None)
@@ -354,20 +487,29 @@ impl LanguageServer for Backend {
         &self,
         params: CompletionParams,
     ) -> jsonrpc::Result<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri;
+        let uri = params.text_document_position.text_document.uri.as_ref();
         let position = params.text_document_position.position;
         let trigger_char = params
             .context
-            .and_then(|ctx| ctx.trigger_character)
+            .as_ref()
+            .and_then(|ctx| ctx.trigger_character.as_ref())
             .and_then(|s| s.chars().next());
 
-        let views = self.state.views.read().await;
+        let mut shift = FIRST_LINE_SHIFT;
 
-        if let Some(view) = views.get(&uri.to_string()) {
+        let (mut completion_items, extract_file) = {
+            let views = self.state.views.read().await;
+            let Some(view) = views.get(&uri.to_string()) else {
+                debug!("Error while getting completion items");
+                return Ok(None);
+            };
+
             let syntax_context = SyntaxContext::detect(&view.tree, &view.source, position);
             let mut completion_items: Vec<CompletionItem> = Vec::new();
 
-            if syntax_context == SyntaxContext::Html {
+            debug!("(COMPLATION) ctx: {:?}, pos: {:?}", syntax_context, position);
+
+            let extract_file: Option<Url> = if syntax_context == SyntaxContext::Html {
                 if let Some(tc) = trigger_char {
                     for (item_char, item) in view.completion_items.values() {
                         if *item_char == tc {
@@ -377,6 +519,9 @@ impl LanguageServer for Backend {
 
                     if tc == '@' {
                         completion_items.extend(self.state.completion_items.clone());
+                        view.extract_file.to_owned()
+                    } else {
+                        None
                     }
                 } else {
                     for (_, item) in view.completion_items.values() {
@@ -384,6 +529,8 @@ impl LanguageServer for Backend {
                     }
 
                     completion_items.extend(self.state.completion_items.clone());
+
+                    None
                 }
             } else {
                 match syntax_context {
@@ -393,6 +540,8 @@ impl LanguageServer for Backend {
                                 completion_items.push(item.clone());
                             }
                         }
+
+                        None
                     }
                     SyntaxContext::ComponentParameter(component_name) => {
                         for (name, params) in view.use_directives_names_and_params().into_iter() {
@@ -411,19 +560,89 @@ impl LanguageServer for Backend {
                                 break;
                             }
                         }
+
+                        None
                     }
-                    _ => {}
+                    SyntaxContext::RustCode => view.extract_file.to_owned(),
+                    SyntaxContext::TemplateParams => {
+                        shift = PARAMS_SHIFT;
+                        view.extract_file.to_owned()
+                    }
+                    _ => None,
                 }
+            };
+
+            debug!("Extract File: {:?}", extract_file);
+            (completion_items, extract_file)
+        };
+
+        let ra_items = async {
+            let mut ra_params = params.clone();
+            let extract_file_uri = extract_file?;
+            ra_params.text_document_position.text_document.uri = extract_file_uri;
+
+            if ra_params.text_document_position.position.line == 0 {
+                ra_params.text_document_position.position.character += shift as u32;
             }
 
-            return Ok(Some(CompletionResponse::List(CompletionList {
-                is_incomplete: true,
-                items: completion_items,
-            })));
+            let ra_client = self.ra_client.get()?.as_ref()?;
+
+            debug!(
+                "(COMPLETION) RA completion will send, uri: ({})",
+                &ra_params.text_document_position.text_document.uri
+            );
+            let completion_value = ra_client.completion(ra_params).await;
+            debug!("(COMPLETION) RA completion sent");
+
+            let response = Some(completion_value).filter(|v| !v.is_null()).and_then(|v| {
+                serde_json::from_value::<CompletionResponse>(v)
+                    .inspect_err(|e| debug!("RA Completion JSON parse error: {}", e))
+                    .ok()
+            })?;
+
+            let mut items = match response {
+                CompletionResponse::Array(items) => items,
+                CompletionResponse::List(completion_list) => completion_list.items,
+            };
+
+            unshift(&mut items, shift as u32);
+            Some(items)
+        }
+        .await;
+
+        if let Some(tg) = trigger_char
+            && tg == '@'
+        {
+            completion_items.extend(ra_items.into_iter().flatten().filter(
+                |item| match item.kind {
+                    Some(CompletionItemKind::VARIABLE) => true,
+                    Some(CompletionItemKind::FUNCTION) => {
+                        ["json(...)", "json_let(...)", "time(...)"].contains(&item.label.as_str())
+                    }
+                    _ => false,
+                },
+            ));
+        } else {
+            completion_items.extend(ra_items.into_iter().flatten());
         }
 
-        debug!("Error while getting completion items");
-        Ok(None)
+        return Ok(Some(CompletionResponse::List(CompletionList {
+            is_incomplete: true,
+            items: completion_items,
+        })));
+
+        fn unshift(items: &mut [CompletionItem], shift: u32) {
+            for item in items {
+                if let Some(CompletionTextEdit::Edit(e)) = &mut item.text_edit {
+                    if e.range.start.line == 0 {
+                        e.range.start.character = e.range.start.character.saturating_sub(shift);
+                    }
+                    if e.range.end.line == 0 {
+                        e.range.end.character = e.range.end.character.saturating_sub(shift);
+                    }
+                }
+            }
+        }
     }
 
     async fn goto_definition(
@@ -471,20 +690,11 @@ impl LanguageServer for Backend {
             )
         {
             let (range, markdown) = match target {
-                NavigationTarget::Component {
-                    name,
-                    target_uri,
-                    range,
-                    params,
-                } => {
+                NavigationTarget::Component { name, target_uri, range, params } => {
                     let params_doc = if params.is_empty() {
                         "_No parameters_".to_string()
                     } else {
-                        params
-                            .iter()
-                            .map(|p| format!("- `{}`", p))
-                            .collect::<Vec<_>>()
-                            .join("\n")
+                        params.iter().map(|p| format!("- `{}`", p)).collect::<Vec<_>>().join("\n")
                     };
 
                     let file_name = target_uri
@@ -498,11 +708,7 @@ impl LanguageServer for Backend {
 
                     (range, doc)
                 }
-                NavigationTarget::UseDirective {
-                    path,
-                    target_uri: _,
-                    range,
-                } => {
+                NavigationTarget::UseDirective { path, target_uri: _, range } => {
                     let doc = format!("### Component Import\n\n`{path}`");
                     (range, doc)
                 }
@@ -521,10 +727,8 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let cargo_toml_changed = params
-            .changes
-            .iter()
-            .any(|event| event.uri.path().ends_with("/Cargo.toml"));
+        let cargo_toml_changed =
+            params.changes.iter().any(|event| event.uri.path().ends_with("/Cargo.toml"));
 
         if !cargo_toml_changed {
             return;

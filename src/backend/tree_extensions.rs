@@ -1,3 +1,4 @@
+use crate::app_state::view::Snippet;
 use tower_lsp::lsp_types;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
 use tracing::error;
@@ -21,6 +22,8 @@ pub trait TreeExtensions {
     fn find_template_params(&self, language: &Language, source: &str) -> Vec<String>;
 
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic>;
+
+    fn extract_snippets(&self, language: &Language, source: &str) -> Vec<Snippet>;
 
     fn from_range(range: Range) -> lsp_types::Range {
         let start_point = range.start_point;
@@ -70,7 +73,7 @@ impl TreeExtensions for tree_sitter::Tree {
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)> {
         let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (component_tag_identifier) @use_alias)?)";
         self.find(language, query_str, source, |x| {
-            let mut captures = x.captures.iter();
+            let mut captures = x.captures().iter();
             let use_path = captures
                 .next()?
                 .node
@@ -96,8 +99,8 @@ impl TreeExtensions for tree_sitter::Tree {
     fn find_template_params(&self, language: &Language, source: &str) -> Vec<String> {
         let query_str = "[(template_params (param (param_name) @param_name))]";
         self.find(language, query_str, source, |x| {
-            let mut param_names = Vec::with_capacity(x.captures.len());
-            for c in x.captures {
+            let mut param_names = Vec::with_capacity(x.captures().len());
+            for c in x.captures() {
                 param_names.push(
                     c.node
                         .utf8_text(source.as_bytes())
@@ -118,7 +121,7 @@ impl TreeExtensions for tree_sitter::Tree {
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic> {
         let query_str = "[(ERROR) @error (MISSING) @missing]";
         self.find(language, query_str, source, |x| {
-            let node = x.captures.first()?.node;
+            let node = x.captures().first()?.node;
 
             let range = if node.is_missing() {
                 node.parent().map_or(node.range(), |parent| parent.range())
@@ -132,23 +135,88 @@ impl TreeExtensions for tree_sitter::Tree {
             let message = if node.is_missing() {
                 format!("Missing `{}`", node.kind().replace('_', " "))
             } else {
-                format!(
-                    "Syntax error in `{}`",
-                    node.utf8_text(source.as_bytes()).ok()?
-                )
+                format!("Syntax error in `{}`", node.utf8_text(source.as_bytes()).ok()?)
             };
 
-            let diagnostic = Diagnostic {
-                range,
-                message,
-                severity,
-                ..Default::default()
-            };
+            let diagnostic = Diagnostic { range, message, severity, ..Default::default() };
 
             Some(diagnostic)
         })
         .unwrap_or_else(|err| {
             error!("Error during error query: {}", err);
+            vec![]
+        })
+    }
+
+    fn extract_snippets(&self, language: &Language, source: &str) -> Vec<Snippet> {
+        let query_str = "[
+            (template_params (param (param_name) @param_name (rust_text) @param_type)) @template_params_block
+            (rust_text) @rust_text
+            (if_stmt [(open_brace) (close_brace)] @brace)
+            (else_clause [(open_brace) (close_brace)] @brace)
+            (for_stmt [(open_brace) (close_brace)] @brace)
+            (while_stmt [(open_brace) (close_brace)] @brace)
+            (child_content_) @child_content
+            (continue_) @continue
+            (break_) @break
+            (component_tag_parameter [(open_brace) (close_brace)] @brace)
+            (html_text) @html_text
+        ]";
+
+        self.find(language, query_str, source, |x| {
+            let first_cap = x.captures().first()?;
+            let node = first_cap.node;
+            let range = node.byte_range();
+            let text = node.utf8_text(source.as_bytes()).ok()?.to_string();
+
+            match node.kind() {
+                "template_params" => {
+                    let params_range = (range.start + 1)..range.end;
+                    let mut params_text = text[1..].to_string();
+
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "param" {
+                            let mut param_cursor = child.walk();
+                            for param_node in child.children(&mut param_cursor) {
+                                if param_node.kind() == "param_name"
+                                    && let Ok(name_text) = param_node.utf8_text(source.as_bytes())
+                                    && name_text.starts_with("self")
+                                    && name_text[4..].starts_with(|c: char| c.is_whitespace())
+                                {
+                                    let offset = param_node.start_byte() - (range.start + 1);
+                                    params_text.replace_range(offset..offset + 4, "    ");
+                                }
+                            }
+                        }
+                    }
+
+                    Some(Snippet::Params(params_range, params_text))
+                }
+                "html_text" => {
+                    let char_count = text.chars().count();
+                    let consumed_bytes = range.len();
+
+                    let bytes_to_delete = consumed_bytes.saturating_sub(char_count);
+
+                    Some(Snippet::Html(range, bytes_to_delete))
+                }
+                "child_content_" | "continue_" | "break_" => Some(Snippet::Directive(range, text)),
+                "rust_text" => {
+                    let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+
+                    match parent_kind {
+                        "param" => None,
+                        "rust_expr_paren" => Some(Snippet::ExprParen(range, text)),
+                        "rust_expr_simple" => Some(Snippet::ExprSimple(range, text)),
+                        _ => Some(Snippet::Statement(range, text)),
+                    }
+                }
+                _ => Some(Snippet::Statement(range, text)),
+            }
+        })
+        .unwrap_or_else(|x| {
+            error!("Error during extract query: {}", x);
             vec![]
         })
     }
@@ -178,13 +246,7 @@ pub mod tests {
         let uses = tree.find_uses(&lang, source);
 
         assert_eq!(uses.len(), 2);
-        assert_eq!(
-            uses[0],
-            (
-                "components/button.rs.html".to_string(),
-                Some("Button".to_string())
-            )
-        );
+        assert_eq!(uses[0], ("components/button.rs.html".to_string(), Some("Button".to_string())));
         assert_eq!(uses[1], ("views/header.rs.html".to_string(), None));
     }
 
@@ -221,11 +283,7 @@ pub mod tests {
         let (tree, lang) = parse_rshtml(source);
         let errors = tree.find_error(&lang, source);
 
-        assert!(
-            errors.is_empty(),
-            "Valid code should produce no diagnostics: {:?}",
-            errors
-        );
+        assert!(errors.is_empty(), "Valid code should produce no diagnostics: {:?}", errors);
     }
 
     #[test]
@@ -251,11 +309,7 @@ pub mod tests {
         let params = tree.find_template_params(&lang, source);
 
         assert_eq!(params, vec!["title", "items", "map"]);
-        assert!(
-            errors.is_empty(),
-            "Generics in template_params must be valid: {:?}",
-            errors
-        );
+        assert!(errors.is_empty(), "Generics in template_params must be valid: {:?}", errors);
     }
 
     #[test]
