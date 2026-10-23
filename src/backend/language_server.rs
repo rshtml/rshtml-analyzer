@@ -17,7 +17,8 @@ use tower_lsp::lsp_types::{
     SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
     SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
     SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentIdentifier,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, Url,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
 use tracing::{debug, error};
@@ -61,8 +62,14 @@ impl LanguageServer for Backend {
         debug!("Sending an initialize response.");
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::INCREMENTAL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::INCREMENTAL),
+                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                        will_save: None,
+                        will_save_wait_until: None,
+                    },
                 )),
                 semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
