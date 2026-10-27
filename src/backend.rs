@@ -53,8 +53,7 @@ impl Backend {
     }
 
     pub fn calculate_new_end_point(start_pos: Position, text: &str) -> Point {
-        let mut new_pos =
-            Point { row: start_pos.line as usize, column: start_pos.character as usize };
+        let mut new_pos = Point { row: start_pos.line as usize, column: start_pos.character as usize };
 
         for (i, line) in text.lines().enumerate() {
             if i == 0 {
@@ -83,14 +82,8 @@ impl Backend {
                     start_byte,
                     old_end_byte: end_byte,
                     new_end_byte: start_byte + change.text.len(),
-                    start_position: Point {
-                        row: range.start.line as usize,
-                        column: range.start.character as usize,
-                    },
-                    old_end_position: Point {
-                        row: range.end.line as usize,
-                        column: range.end.character as usize,
-                    },
+                    start_position: Point { row: range.start.line as usize, column: range.start.character as usize },
+                    old_end_position: Point { row: range.end.line as usize, column: range.end.character as usize },
                     new_end_position: Self::calculate_new_end_point(range.start, &change.text),
                 };
 
@@ -104,13 +97,9 @@ impl Backend {
         }
     }
 
-    pub async fn generate_extract_file_path(
-        root_path: &Path,
-        relative_path: &Path,
-    ) -> io::Result<PathBuf> {
-        let manifest_dir = fs::canonicalize(root_path)
-            .await
-            .map_err(|e| io::Error::new(e.kind(), format!("{root_path:?}: {e}")))?;
+    pub async fn generate_extract_file_path(root_path: &Path, relative_path: &Path) -> io::Result<PathBuf> {
+        let manifest_dir =
+            fs::canonicalize(root_path).await.map_err(|e| io::Error::new(e.kind(), format!("{root_path:?}: {e}")))?;
 
         let mut target_path = manifest_dir.join(".rshtml");
 
@@ -156,10 +145,7 @@ impl Backend {
     }
 
     #[allow(dead_code)]
-    async fn debug_check_source_mismatch(
-        extract_file: &Option<(Url, PathBuf)>,
-        extract_source: &str,
-    ) {
+    async fn debug_check_source_mismatch(extract_file: &Option<(Url, PathBuf)>, extract_source: &str) {
         if let Some((_, extract_file_path)) = extract_file {
             let Ok(extract_text) = tokio::fs::read_to_string(&extract_file_path).await else {
                 return;
@@ -257,8 +243,7 @@ mod tests {
             text: "world!".to_string(),
         };
 
-        let (service, _) =
-            tower_lsp::LspService::new(|client| Backend::new(client, AppState::setup()));
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client, AppState::setup()));
         let backend = service.inner();
 
         backend.process_changes(vec![change], &mut source, &mut tree);
@@ -267,10 +252,7 @@ mod tests {
 
         // Reparsing with the edited tree should succeed
         let new_tree = parser.parse(&source, Some(&tree)).unwrap();
-        assert_eq!(
-            new_tree.root_node().to_sexp(),
-            parser.parse(&source, None).unwrap().root_node().to_sexp()
-        );
+        assert_eq!(new_tree.root_node().to_sexp(), parser.parse(&source, None).unwrap().root_node().to_sexp());
     }
 
     #[test]
@@ -289,8 +271,7 @@ mod tests {
             text: "<div>replacement</div>".to_string(),
         };
 
-        let (service, _) =
-            tower_lsp::LspService::new(|client| Backend::new(client, AppState::setup()));
+        let (service, _) = tower_lsp::LspService::new(|client| Backend::new(client, AppState::setup()));
         let backend = service.inner();
 
         backend.process_changes(vec![change], &mut source, &mut tree);

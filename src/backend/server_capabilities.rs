@@ -1,8 +1,7 @@
 use crate::consts::{SEMANTIC_TOKEN_MODIFIERS, SEMANTIC_TOKEN_TYPES};
 use tower_lsp::lsp_types::{
-    OneOf, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
-    SemanticTokensServerCapabilities, WorkDoneProgressOptions, WorkspaceFoldersServerCapabilities,
-    WorkspaceServerCapabilities,
+    OneOf, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions, SemanticTokensServerCapabilities,
+    WorkDoneProgressOptions, WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities,
 };
 
 pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities> {
@@ -11,17 +10,13 @@ pub fn semantic_tokens_capabilities() -> Option<SemanticTokensServerCapabilities
         token_modifiers: SEMANTIC_TOKEN_MODIFIERS.to_vec(),
     };
 
-    Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
-        SemanticTokensOptions {
-            work_done_progress_options: WorkDoneProgressOptions {
-                work_done_progress: None,
-            },
-            legend,
-            range: Some(true),
-            full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
-            // full: Some(SemanticTokensFullOptions::Bool(true)),
-        },
-    ))
+    Some(SemanticTokensServerCapabilities::SemanticTokensOptions(SemanticTokensOptions {
+        work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
+        legend,
+        range: Some(true),
+        full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
+        // full: Some(SemanticTokensFullOptions::Bool(true)),
+    }))
 }
 
 pub fn workspace_capabilities() -> Option<WorkspaceServerCapabilities> {

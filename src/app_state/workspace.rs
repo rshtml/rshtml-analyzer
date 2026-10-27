@@ -14,10 +14,7 @@ pub struct Member {
 
 impl Default for Workspace {
     fn default() -> Self {
-        Workspace {
-            root: PathBuf::new(),
-            members: Vec::new(),
-        }
+        Workspace { root: PathBuf::new(), members: Vec::new() }
     }
 }
 
@@ -28,16 +25,9 @@ impl Workspace {
 
         let member_paths = cargo_toml
             .get("workspace")
-            .and_then(|workspace| {
-                workspace
-                    .get("members")
-                    .and_then(|members| members.as_array())
-            })
+            .and_then(|workspace| workspace.get("members").and_then(|members| members.as_array()))
             .map(|members| {
-                members
-                    .iter()
-                    .map(|member| root.join(member.to_string().trim_matches('"')))
-                    .collect::<Vec<_>>()
+                members.iter().map(|member| root.join(member.to_string().trim_matches('"'))).collect::<Vec<_>>()
             });
 
         let mut members: Vec<Member> = Vec::new();
@@ -45,16 +35,12 @@ impl Workspace {
         if let Some(member_paths) = member_paths {
             for member_path in member_paths {
                 debug!("MEMBER PATH: {}", member_path.to_str().unwrap());
-                let member = Member {
-                    path: member_path.clone(),
-                };
+                let member = Member { path: member_path.clone() };
 
                 members.push(member);
             }
         } else {
-            let member = Member {
-                path: root.to_path_buf(),
-            };
+            let member = Member { path: root.to_path_buf() };
 
             debug!("MEMBER PATH: {}", member.path.to_string_lossy().to_string());
 

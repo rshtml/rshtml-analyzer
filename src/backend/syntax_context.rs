@@ -39,9 +39,7 @@ impl SyntaxContext {
 
                     let mut cursor = n.walk();
                     for child in n.children(&mut cursor) {
-                        if child.kind() == "component_tag_identifier"
-                            && byte_offset > child.end_byte()
-                        {
+                        if child.kind() == "component_tag_identifier" && byte_offset > child.end_byte() {
                             if let Ok(text) = child.utf8_text(source.as_bytes()) {
                                 component_name = text.to_string();
                             }
@@ -103,8 +101,7 @@ impl SyntaxContext {
                 "html_text" => return Self::Html,
                 _ => {
                     if byte_offset > 0
-                        && let Some(prev) =
-                            root.descendant_for_byte_range(byte_offset - 1, byte_offset - 1)
+                        && let Some(prev) = root.descendant_for_byte_range(byte_offset - 1, byte_offset - 1)
                         && (prev.kind() == "rust_expr_simple"
                             || prev.parent().is_some_and(|p| p.kind() == "rust_expr_simple"))
                     {

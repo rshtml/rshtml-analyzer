@@ -4,9 +4,7 @@ use crate::backend::tree_extensions::TreeExtensions;
 use extract::Extract;
 pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
 use std::collections::{HashMap, HashSet};
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url,
-};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url};
 use tree_sitter::{Language, Tree};
 
 pub struct View {
@@ -41,36 +39,22 @@ impl View {
         self.use_directives
             .iter()
             .filter_map(|(path, name, params)| {
-                let name_str = name
-                    .as_deref()
-                    .or_else(|| path.trim_end_matches(".rs.html").split('/').next_back())
-                    .unwrap_or("");
+                let name_str =
+                    name.as_deref().or_else(|| path.trim_end_matches(".rs.html").split('/').next_back()).unwrap_or("");
 
-                if name_str.is_empty() {
-                    None
-                } else {
-                    Some((name_str.to_string(), params.to_owned()))
-                }
+                if name_str.is_empty() { None } else { Some((name_str.to_string(), params.to_owned())) }
             })
             .collect()
     }
 
-    pub fn sync_use_directives(
-        &mut self,
-        use_directives: Vec<(String, Option<String>)>,
-    ) -> Vec<(usize, String)> {
+    pub fn sync_use_directives(&mut self, use_directives: Vec<(String, Option<String>)>) -> Vec<(usize, String)> {
         if self.use_directives.len() == use_directives.len()
-            && self
-                .use_directives
-                .iter()
-                .zip(&use_directives)
-                .all(|((op, oa, _), (np, na))| op == np && oa == na)
+            && self.use_directives.iter().zip(&use_directives).all(|((op, oa, _), (np, na))| op == np && oa == na)
         {
             return Vec::new();
         }
 
-        self.use_directives
-            .retain(|(old_path, _, _)| use_directives.iter().any(|(new_p, _)| new_p == old_path));
+        self.use_directives.retain(|(old_path, _, _)| use_directives.iter().any(|(new_p, _)| new_p == old_path));
 
         let mut new_use_ids = Vec::new();
 
@@ -87,10 +71,7 @@ impl View {
         new_use_ids
     }
 
-    fn use_directive_completion_item(
-        use_name: &str,
-        use_params: &[String],
-    ) -> (char, CompletionItem) {
+    fn use_directive_completion_item(use_name: &str, use_params: &[String]) -> (char, CompletionItem) {
         let snippet_params = use_params
             .iter()
             .enumerate()
@@ -129,25 +110,20 @@ impl View {
         let current_names_and_params: HashSet<(String, Vec<String>)> =
             self.use_directives_names_and_params().into_iter().collect();
 
-        self.completion_items
-            .retain(|name, _| current_names_and_params.iter().any(|(n, _)| n == name));
+        self.completion_items.retain(|name, _| current_names_and_params.iter().any(|(n, _)| n == name));
 
         for (name, params) in current_names_and_params {
-            self.completion_items.entry(name).or_insert_with_key(|use_name| {
-                Self::use_directive_completion_item(use_name, &params)
-            });
+            self.completion_items
+                .entry(name)
+                .or_insert_with_key(|use_name| Self::use_directive_completion_item(use_name, &params));
         }
     }
 
     pub fn extract_source(&self, language: &Language) -> String {
         let snippets = self.tree.extract_snippets(language, &self.source);
 
-        let cleaned_source = self
-            .source
-            .as_bytes()
-            .iter()
-            .map(|&b| if b == b'\n' { b'\n' } else { b' ' })
-            .collect::<Vec<u8>>();
+        let cleaned_source =
+            self.source.as_bytes().iter().map(|&b| if b == b'\n' { b'\n' } else { b' ' }).collect::<Vec<u8>>();
 
         let mut extract = Extract::new(cleaned_source);
         for snippet in snippets {
@@ -181,11 +157,7 @@ mod tests {
     fn test_use_directives_names_and_params() {
         let mut view = View::new("".to_string(), dummy_tree(), 1, None);
         view.use_directives = vec![
-            (
-                "components/button.rs.html".to_string(),
-                Some("Button".to_string()),
-                vec!["label".to_string()],
-            ),
+            ("components/button.rs.html".to_string(), Some("Button".to_string()), vec!["label".to_string()]),
             ("views/header.rs.html".to_string(), None, vec![]),
         ];
 
@@ -200,10 +172,8 @@ mod tests {
         let mut view = View::new("".to_string(), dummy_tree(), 1, None);
 
         // Initial sync
-        let new_uses = view.sync_use_directives(vec![(
-            "components/button.rs.html".to_string(),
-            Some("Button".to_string()),
-        )]);
+        let new_uses =
+            view.sync_use_directives(vec![("components/button.rs.html".to_string(), Some("Button".to_string()))]);
         assert_eq!(new_uses.len(), 1);
         assert_eq!(new_uses[0], (0, "components/button.rs.html".to_string()));
 
@@ -211,18 +181,13 @@ mod tests {
         view.use_directives[0].2 = vec!["variant".to_string()];
 
         // Sync identical list -> returns empty and keeps existing params
-        let new_uses2 = view.sync_use_directives(vec![(
-            "components/button.rs.html".to_string(),
-            Some("Button".to_string()),
-        )]);
+        let new_uses2 =
+            view.sync_use_directives(vec![("components/button.rs.html".to_string(), Some("Button".to_string()))]);
         assert!(new_uses2.is_empty());
         assert_eq!(view.use_directives[0].2, vec!["variant".to_string()]);
 
         // Sync with a new directive and removing button
-        let new_uses3 = view.sync_use_directives(vec![(
-            "views/card.rs.html".to_string(),
-            Some("Card".to_string()),
-        )]);
+        let new_uses3 = view.sync_use_directives(vec![("views/card.rs.html".to_string(), Some("Card".to_string()))]);
         assert_eq!(new_uses3.len(), 1);
         assert_eq!(view.use_directives.len(), 1);
         assert_eq!(view.use_directives[0].0, "views/card.rs.html");
@@ -244,9 +209,6 @@ mod tests {
         let (trigger, completion) = item.unwrap();
         assert_eq!(*trigger, '<');
         assert_eq!(completion.label, "Button");
-        assert_eq!(
-            completion.insert_text,
-            Some("Button label=\"${1:label}\" active=\"${2:active}\"/>".to_string())
-        );
+        assert_eq!(completion.insert_text, Some("Button label=\"${1:label}\" active=\"${2:active}\"/>".to_string()));
     }
 }

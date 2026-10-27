@@ -10,10 +10,7 @@ use tower_lsp::{LspService, Server};
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(
-        long,
-        help = "Run in stdio mode (used by LSP clients like Zed / VSCode)"
-    )]
+    #[arg(long, help = "Run in stdio mode (used by LSP clients like Zed / VSCode)")]
     stdio: bool,
 
     #[arg(short = 'V', long, help = "Prints version information")]
@@ -27,24 +24,13 @@ use tracing::debug;
 async fn main() {
     let cli = Cli::parse();
     if cli.version {
-        println!(
-            "rshtml-analyzer {} ({})",
-            env!("CARGO_PKG_VERSION"),
-            consts::BUILD_MODE
-        );
+        println!("rshtml-analyzer {} ({})", env!("CARGO_PKG_VERSION"), consts::BUILD_MODE);
         return;
     }
 
-    let filter_level = if cfg!(debug_assertions) {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    };
+    let filter_level = if cfg!(debug_assertions) { tracing::Level::DEBUG } else { tracing::Level::INFO };
 
-    tracing_subscriber::fmt()
-        .with_max_level(filter_level)
-        .with_writer(std::io::stderr)
-        .init();
+    tracing_subscriber::fmt().with_max_level(filter_level).with_writer(std::io::stderr).init();
 
     // If --stdio is specified or if built in release mode, default to stdio.
     // In debug builds without --stdio, default to TCP for debugging.

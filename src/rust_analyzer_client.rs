@@ -9,10 +9,9 @@ use tokio::sync::{Mutex, oneshot};
 use tower_lsp::Client;
 use tower_lsp::lsp_types::{
     ClientCapabilities, CompletionClientCapabilities, CompletionItemCapability, CompletionParams,
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    InitializeParams, PublishDiagnosticsParams, TextDocumentClientCapabilities,
-    TextDocumentContentChangeEvent, TextDocumentItem, TextDocumentSyncClientCapabilities, Url,
-    VersionedTextDocumentIdentifier,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializeParams,
+    PublishDiagnosticsParams, TextDocumentClientCapabilities, TextDocumentContentChangeEvent, TextDocumentItem,
+    TextDocumentSyncClientCapabilities, Url, VersionedTextDocumentIdentifier,
 };
 use tracing::{debug, error};
 
@@ -83,10 +82,7 @@ impl RustAnalyzerClient {
                             (Some(id), Some(method)) => {
                                 let result = if method == "workspace/configuration" {
                                     debug!("RA sent a pull request for the configs.");
-                                    let n = json["params"]["items"]
-                                        .as_array()
-                                        .map(|a| a.len())
-                                        .unwrap_or(1);
+                                    let n = json["params"]["items"].as_array().map(|a| a.len()).unwrap_or(1);
                                     let cfg = json!({
                                         "rust": { "analyzerTargetDir": true }
                                     });
@@ -110,8 +106,7 @@ impl RustAnalyzerClient {
                             }
                             (Some(id), None) => {
                                 if let Some(id) = id.as_u64()
-                                    && let Some(tx) =
-                                        pending_requests_clone.lock().await.remove(&id)
+                                    && let Some(tx) = pending_requests_clone.lock().await.remove(&id)
                                 {
                                     let _ = tx.send(json);
                                 }
@@ -120,9 +115,7 @@ impl RustAnalyzerClient {
                                 if method == "textDocument/publishDiagnostics" {
                                     if let Some(params) = json.get("params")
                                         && let Ok(mut diag_params) =
-                                            serde_json::from_value::<PublishDiagnosticsParams>(
-                                                params.clone(),
-                                            )
+                                            serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
                                     {
                                         tracing::debug!("RA Diagnostics Received:\n{:#?}", params);
 
@@ -192,10 +185,7 @@ impl RustAnalyzerClient {
         self.write_to_stdin(message).await;
 
         rx.await.unwrap_or_else(|_| {
-            tracing::error!(
-                "The channel was closed; no response was received for method: {}",
-                method
-            );
+            tracing::error!("The channel was closed; no response was received for method: {}", method);
             serde_json::Value::Null
         })
     }
@@ -205,10 +195,7 @@ impl RustAnalyzerClient {
         let lsp_msg = format!("Content-Length: {}\r\n\r\n{}", msg_string.len(), msg_string);
 
         let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(lsp_msg.as_bytes())
-            .await
-            .unwrap_or_else(|e| error!("Failed to write to RA stdin: {}", e));
+        stdin.write_all(lsp_msg.as_bytes()).await.unwrap_or_else(|e| error!("Failed to write to RA stdin: {}", e));
         stdin.flush().await.unwrap_or_else(|e| error!("Failed to flush RA stdin: {}", e));
     }
 
@@ -257,12 +244,7 @@ impl RustAnalyzerClient {
 
     pub async fn did_open(&self, uri: Url, text: String) {
         let params = DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri,
-                language_id: "rust".to_string(),
-                version: 1,
-                text,
-            },
+            text_document: TextDocumentItem { uri, language_id: "rust".to_string(), version: 1, text },
         };
         self.send_notification("textDocument/didOpen", serde_json::to_value(params).unwrap()).await;
         debug!("RA open file request sent.");
@@ -274,21 +256,14 @@ impl RustAnalyzerClient {
     pub async fn did_change(&self, uri: Url, version: i32, new_text: String) {
         let params = DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier { uri, version },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                range: None,
-                range_length: None,
-                text: new_text,
-            }],
+            content_changes: vec![TextDocumentContentChangeEvent { range: None, range_length: None, text: new_text }],
         };
 
-        self.send_notification("textDocument/didChange", serde_json::to_value(params).unwrap())
-            .await;
+        self.send_notification("textDocument/didChange", serde_json::to_value(params).unwrap()).await;
     }
 
     pub async fn completion(&self, params: CompletionParams) -> Value {
-        let response = self
-            .send_request("textDocument/completion", serde_json::to_value(params).unwrap())
-            .await;
+        let response = self.send_request("textDocument/completion", serde_json::to_value(params).unwrap()).await;
 
         if let Some(err) = response.get("error") {
             debug!("(COMPLATION) RA completion error: {err}");

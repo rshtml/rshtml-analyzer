@@ -24,8 +24,7 @@ impl Snippet {
 }
 
 const PREFIX: &[u8] = b"fn render(child_content: impl ::rshtml::View,";
-const PREFIX_NO_PARAMS: &[u8] =
-    b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{";
+const PREFIX_NO_PARAMS: &[u8] = b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{";
 const POSTFIX: &[u8] = b"->::std::fmt::Result{";
 
 const _: () = assert!(PREFIX_NO_PARAMS.len() == FIRST_LINE_SHIFT);

@@ -7,13 +7,7 @@ use tree_sitter::{Language, Query, QueryCursor, QueryMatch, Range, StreamingIter
 pub trait TreeExtensions {
     const STRING_TRIMS: &'_ [char] = &[' ', '\'', '"'];
 
-    fn find<T, F>(
-        &self,
-        language: &Language,
-        query_str: &str,
-        source: &str,
-        processor: F,
-    ) -> Result<Vec<T>, String>
+    fn find<T, F>(&self, language: &Language, query_str: &str, source: &str, processor: F) -> Result<Vec<T>, String>
     where
         F: FnMut(&QueryMatch) -> Option<T>;
 
@@ -29,31 +23,18 @@ pub trait TreeExtensions {
         let start_point = range.start_point;
         let end_point = range.end_point;
         lsp_types::Range {
-            start: lsp_types::Position {
-                line: start_point.row as u32,
-                character: start_point.column as u32,
-            },
-            end: lsp_types::Position {
-                line: end_point.row as u32,
-                character: end_point.column as u32,
-            },
+            start: lsp_types::Position { line: start_point.row as u32, character: start_point.column as u32 },
+            end: lsp_types::Position { line: end_point.row as u32, character: end_point.column as u32 },
         }
     }
 }
 
 impl TreeExtensions for tree_sitter::Tree {
-    fn find<T, F>(
-        &self,
-        language: &Language,
-        query_str: &str,
-        source: &str,
-        mut processor: F,
-    ) -> Result<Vec<T>, String>
+    fn find<T, F>(&self, language: &Language, query_str: &str, source: &str, mut processor: F) -> Result<Vec<T>, String>
     where
         F: FnMut(&QueryMatch) -> Option<T>,
     {
-        let query =
-            Query::new(language, query_str).map_err(|e| format!("Failed to create query: {e}"))?;
+        let query = Query::new(language, query_str).map_err(|e| format!("Failed to create query: {e}"))?;
         let mut query_cursor = QueryCursor::new();
         let source_bytes = source.as_bytes();
 
@@ -71,7 +52,8 @@ impl TreeExtensions for tree_sitter::Tree {
     }
 
     fn find_uses(&self, language: &Language, source: &str) -> Vec<(String, Option<String>)> {
-        let query_str = "(use_directive path: (string_line) @use_path (as_clause alias: (component_tag_identifier) @use_alias)?)";
+        let query_str =
+            "(use_directive path: (string_line) @use_path (as_clause alias: (component_tag_identifier) @use_alias)?)";
         self.find(language, query_str, source, |x| {
             let mut captures = x.captures().iter();
             let use_path = captures
@@ -83,10 +65,8 @@ impl TreeExtensions for tree_sitter::Tree {
                 .trim_matches(Self::STRING_TRIMS)
                 .to_string();
 
-            let use_alias = captures
-                .next()
-                .and_then(|x| x.node.utf8_text(source.as_bytes()).ok())
-                .map(|x| x.trim().to_string());
+            let use_alias =
+                captures.next().and_then(|x| x.node.utf8_text(source.as_bytes()).ok()).map(|x| x.trim().to_string());
 
             Some((use_path, use_alias))
         })
@@ -102,10 +82,7 @@ impl TreeExtensions for tree_sitter::Tree {
             let mut param_names = Vec::with_capacity(x.captures().len());
             for c in x.captures() {
                 param_names.push(
-                    c.node
-                        .utf8_text(source.as_bytes())
-                        .map(|s| s.trim_matches(Self::STRING_TRIMS).to_string())
-                        .ok()?,
+                    c.node.utf8_text(source.as_bytes()).map(|s| s.trim_matches(Self::STRING_TRIMS).to_string()).ok()?,
                 );
             }
             Some(param_names)
@@ -349,10 +326,6 @@ pub mod tests {
 "#;
         let (tree, lang) = parse_rshtml(source);
         let errors = tree.find_error(&lang, source);
-        assert!(
-            errors.is_empty(),
-            "Turbofish ::<Vec<_>> inside @(...) must not cause syntax errors: {:?}",
-            errors
-        );
+        assert!(errors.is_empty(), "Turbofish ::<Vec<_>> inside @(...) must not cause syntax errors: {:?}", errors);
     }
 }

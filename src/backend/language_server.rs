@@ -8,16 +8,14 @@ use crate::consts;
 use crate::rust_analyzer_client::RustAnalyzerClient;
 use tower_lsp::jsonrpc::Error;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams,
-    CompletionResponse, CompletionTextEdit, DidChangeTextDocumentParams,
-    DidChangeWatchedFilesParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType, OneOf, Range,
-    SemanticTokens, SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
-    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
-    SemanticTokensResult, ServerCapabilities, ServerInfo, TextDocumentIdentifier,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    CompletionItem, CompletionItemKind, CompletionList, CompletionOptions, CompletionParams, CompletionResponse,
+    CompletionTextEdit, DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    InsertTextFormat, Location, MarkupContent, MarkupKind, MessageType, OneOf, Range, SemanticTokens,
+    SemanticTokensDelta, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensParams,
+    SemanticTokensRangeParams, SemanticTokensRangeResult, SemanticTokensResult, ServerCapabilities, ServerInfo,
+    TextDocumentIdentifier, TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, Url,
 };
 use tower_lsp::{LanguageServer, jsonrpc};
@@ -38,9 +36,7 @@ impl LanguageServer for Backend {
 
         if let Some(path) = workspace_root_path {
             debug!("Workspace root path: {:?}", path);
-            self.client
-                .log_message(MessageType::INFO, format!("Workspace root path: {path:?}"))
-                .await;
+            self.client.log_message(MessageType::INFO, format!("Workspace root path: {path:?}")).await;
 
             let mut workspace = self.state.workspace.write().await;
             workspace.root = path.to_path_buf();
@@ -54,23 +50,18 @@ impl LanguageServer for Backend {
             ra.initialize(params.root_uri).await;
             ra.initialized().await;
         }
-        let _ = self
-            .ra_client
-            .set(ra_option)
-            .inspect_err(|e| debug!("RA client could not be set: {e}"));
+        let _ = self.ra_client.set(ra_option).inspect_err(|e| debug!("RA client could not be set: {e}"));
 
         debug!("Sending an initialize response.");
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Options(
-                    TextDocumentSyncOptions {
-                        open_close: Some(true),
-                        change: Some(TextDocumentSyncKind::INCREMENTAL),
-                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
-                        will_save: None,
-                        will_save_wait_until: None,
-                    },
-                )),
+                text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
+                    open_close: Some(true),
+                    change: Some(TextDocumentSyncKind::INCREMENTAL),
+                    save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                    will_save: None,
+                    will_save_wait_until: None,
+                })),
                 semantic_tokens_provider: semantic_tokens_capabilities(),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
@@ -97,19 +88,13 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let version_msg = format!(
-            "rshtml-analyzer v{} ({}) connected!",
-            env!("CARGO_PKG_VERSION"),
-            consts::BUILD_MODE
-        );
+        let version_msg = format!("rshtml-analyzer v{} ({}) connected!", env!("CARGO_PKG_VERSION"), consts::BUILD_MODE);
 
         if cfg!(debug_assertions) {
             self.client.show_message(MessageType::INFO, &version_msg).await;
         }
 
-        self.client
-            .log_message(MessageType::INFO, format!("{version_msg} Handshake completed."))
-            .await;
+        self.client.log_message(MessageType::INFO, format!("{version_msg} Handshake completed.")).await;
     }
 
     async fn shutdown(&self) -> Result<(), Error> {
@@ -130,9 +115,7 @@ impl LanguageServer for Backend {
             if let Some(tree) = parser.parse(&text, None) {
                 tree
             } else {
-                self.client
-                    .log_message(MessageType::ERROR, "Parser error: Couldn't create tree.")
-                    .await;
+                self.client.log_message(MessageType::ERROR, "Parser error: Couldn't create tree.").await;
                 return;
             }
         };
@@ -196,11 +179,7 @@ impl LanguageServer for Backend {
             let errors = view.tree.find_error(&self.state.language, &view.source);
 
             if cfg!(debug_assertions) {
-                Self::debug_check_source_mismatch(
-                    &extract_file,
-                    &view.extract_source(&self.state.language),
-                )
-                .await;
+                Self::debug_check_source_mismatch(&extract_file, &view.extract_source(&self.state.language)).await;
             }
 
             views.insert(uri_str, view);
@@ -213,18 +192,12 @@ impl LanguageServer for Backend {
 
             let extract_text = tokio::fs::read_to_string(&extract_file_path)
                 .await
-                .inspect_err(|e| {
-                    debug!("Failed to read file at '{}': {}", extract_file_path.display(), e)
-                })
+                .inspect_err(|e| debug!("Failed to read file at '{}': {}", extract_file_path.display(), e))
                 .ok()?;
 
             let ra_client = self.ra_client.get()?.as_ref()?;
 
-            ra_client
-                .uri_map
-                .lock()
-                .await
-                .insert(extract_file_uri.clone(), params.text_document.uri.clone());
+            ra_client.uri_map.lock().await.insert(extract_file_uri.clone(), params.text_document.uri.clone());
 
             ra_client.did_open(extract_file_uri, extract_text).await;
 
@@ -235,13 +208,7 @@ impl LanguageServer for Backend {
         }
         .await;
 
-        self.client
-            .publish_diagnostics(
-                params.text_document.uri,
-                errors,
-                Some(params.text_document.version),
-            )
-            .await;
+        self.client.publish_diagnostics(params.text_document.uri, errors, Some(params.text_document.version)).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -317,8 +284,7 @@ impl LanguageServer for Backend {
         };
 
         let _ = async {
-            let (extract_file_uri, extract_source) =
-                extract_file.and_then(|(u, s)| Some((u?, s)))?;
+            let (extract_file_uri, extract_source) = extract_file.and_then(|(u, s)| Some((u?, s)))?;
 
             let ra_client = self.ra_client.get()?.as_ref()?;
 
@@ -327,9 +293,7 @@ impl LanguageServer for Backend {
                 extract_file_uri, params.text_document.version
             );
 
-            ra_client
-                .did_change(extract_file_uri, params.text_document.version, extract_source)
-                .await;
+            ra_client.did_change(extract_file_uri, params.text_document.version, extract_source).await;
 
             debug!("(DID CHANGE) RA did change sent",);
 
@@ -337,21 +301,14 @@ impl LanguageServer for Backend {
         }
         .await;
 
-        self.client
-            .publish_diagnostics(
-                params.text_document.uri,
-                errors,
-                Some(params.text_document.version),
-            )
-            .await;
+        self.client.publish_diagnostics(params.text_document.uri, errors, Some(params.text_document.version)).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
         self.client.log_message(MessageType::INFO, format!("Closed file: {uri}")).await;
 
-        let extract_file =
-            self.state.views.write().await.remove(uri.as_str()).and_then(|view| view.extract_file);
+        let extract_file = self.state.views.write().await.remove(uri.as_str()).and_then(|view| view.extract_file);
 
         if let Some(extract_file_uri) = extract_file
             && let Some(Some(ra_client)) = self.ra_client.get()
@@ -393,10 +350,7 @@ impl LanguageServer for Backend {
         .await;
     }
 
-    async fn semantic_tokens_full(
-        &self,
-        params: SemanticTokensParams,
-    ) -> Result<Option<SemanticTokensResult>, Error> {
+    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>, Error> {
         let uri_str = params.text_document.uri.to_string();
 
         let mut views = self.state.views.write().await;
@@ -409,10 +363,8 @@ impl LanguageServer for Backend {
 
             view.semantic_tokens_version += 1;
 
-            let semantic_tokens = SemanticTokens {
-                result_id: Some(view.semantic_tokens_version.to_string()),
-                data: tokens,
-            };
+            let semantic_tokens =
+                SemanticTokens { result_id: Some(view.semantic_tokens_version.to_string()), data: tokens };
             view.semantic_tokens = semantic_tokens.clone();
 
             return Ok(Some(SemanticTokensResult::Tokens(semantic_tokens)));
@@ -437,24 +389,19 @@ impl LanguageServer for Backend {
             if view.semantic_tokens.result_id.as_ref() != Some(&result_id) {
                 debug!("Semantic Tokens Delta | Full: {:?}", tokens.len());
                 view.semantic_tokens_version += 1;
-                let semantic_tokens = SemanticTokens {
-                    result_id: Some(view.semantic_tokens_version.to_string()),
-                    data: tokens.clone(),
-                };
+                let semantic_tokens =
+                    SemanticTokens { result_id: Some(view.semantic_tokens_version.to_string()), data: tokens.clone() };
                 view.semantic_tokens = semantic_tokens.clone();
                 return Ok(Some(SemanticTokensFullDeltaResult::Tokens(semantic_tokens)));
             }
 
-            let tokens_diff =
-                highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
+            let tokens_diff = highlight.semantic_tokens_difference(&view.semantic_tokens.data, &tokens);
 
             debug!("Semantic Tokens Delta: {:?} {:?}", tokens_diff.len(), tokens_diff);
 
             view.semantic_tokens_version += 1;
-            view.semantic_tokens = SemanticTokens {
-                result_id: Some(view.semantic_tokens_version.to_string()),
-                data: tokens.clone(),
-            };
+            view.semantic_tokens =
+                SemanticTokens { result_id: Some(view.semantic_tokens_version.to_string()), data: tokens.clone() };
 
             return Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
                 result_id: Some(view.semantic_tokens_version.to_string()),
@@ -482,25 +429,16 @@ impl LanguageServer for Backend {
 
             debug!("Semantic Tokens Range: {:?}", tokens.len());
 
-            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
-                result_id: None,
-                data: tokens,
-            })));
+            return Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens { result_id: None, data: tokens })));
         }
         Ok(None)
     }
 
-    async fn completion(
-        &self,
-        params: CompletionParams,
-    ) -> jsonrpc::Result<Option<CompletionResponse>> {
+    async fn completion(&self, params: CompletionParams) -> jsonrpc::Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri.as_ref();
         let position = params.text_document_position.position;
-        let trigger_char = params
-            .context
-            .as_ref()
-            .and_then(|ctx| ctx.trigger_character.as_ref())
-            .and_then(|s| s.chars().next());
+        let trigger_char =
+            params.context.as_ref().and_then(|ctx| ctx.trigger_character.as_ref()).and_then(|s| s.chars().next());
 
         let mut shift = FIRST_LINE_SHIFT;
 
@@ -620,23 +558,18 @@ impl LanguageServer for Backend {
         if let Some(tg) = trigger_char
             && tg == '@'
         {
-            completion_items.extend(ra_items.into_iter().flatten().filter(
-                |item| match item.kind {
-                    Some(CompletionItemKind::VARIABLE) => true,
-                    Some(CompletionItemKind::FUNCTION) => {
-                        ["json(...)", "json_let(...)", "time(...)"].contains(&item.label.as_str())
-                    }
-                    _ => false,
-                },
-            ));
+            completion_items.extend(ra_items.into_iter().flatten().filter(|item| match item.kind {
+                Some(CompletionItemKind::VARIABLE) => true,
+                Some(CompletionItemKind::FUNCTION) => {
+                    ["json(...)", "json_let(...)", "time(...)"].contains(&item.label.as_str())
+                }
+                _ => false,
+            }));
         } else {
             completion_items.extend(ra_items.into_iter().flatten());
         }
 
-        return Ok(Some(CompletionResponse::List(CompletionList {
-            is_incomplete: true,
-            items: completion_items,
-        })));
+        return Ok(Some(CompletionResponse::List(CompletionList { is_incomplete: true, items: completion_items })));
 
         fn unshift(items: &mut [CompletionItem], shift: u32) {
             for item in items {
@@ -652,31 +585,20 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn goto_definition(
-        &self,
-        params: GotoDefinitionParams,
-    ) -> jsonrpc::Result<Option<GotoDefinitionResponse>> {
+    async fn goto_definition(&self, params: GotoDefinitionParams) -> jsonrpc::Result<Option<GotoDefinitionResponse>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
         let views = self.state.views.read().await;
         if let Some(view) = views.get(&uri.to_string())
-            && let Some(target) = NavigationTarget::resolve_at(
-                &view.tree,
-                &view.source,
-                position,
-                &view.use_directives,
-                uri,
-            )
+            && let Some(target) =
+                NavigationTarget::resolve_at(&view.tree, &view.source, position, &view.use_directives, uri)
         {
             let target_uri = match target {
                 NavigationTarget::Component { target_uri, .. } => target_uri,
                 NavigationTarget::UseDirective { target_uri, .. } => target_uri,
             };
-            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
-                uri: target_uri,
-                range: Range::default(),
-            })));
+            return Ok(Some(GotoDefinitionResponse::Scalar(Location { uri: target_uri, range: Range::default() })));
         }
 
         Ok(None)
@@ -688,13 +610,8 @@ impl LanguageServer for Backend {
 
         let views = self.state.views.read().await;
         if let Some(view) = views.get(&uri.to_string())
-            && let Some(target) = NavigationTarget::resolve_at(
-                &view.tree,
-                &view.source,
-                position,
-                &view.use_directives,
-                uri,
-            )
+            && let Some(target) =
+                NavigationTarget::resolve_at(&view.tree, &view.source, position, &view.use_directives, uri)
         {
             let (range, markdown) = match target {
                 NavigationTarget::Component { name, target_uri, range, params } => {
@@ -704,14 +621,11 @@ impl LanguageServer for Backend {
                         params.iter().map(|p| format!("- `{}`", p)).collect::<Vec<_>>().join("\n")
                     };
 
-                    let file_name = target_uri
-                        .path_segments()
-                        .and_then(|mut segments| segments.next_back())
-                        .unwrap_or("<unknown>");
+                    let file_name =
+                        target_uri.path_segments().and_then(|mut segments| segments.next_back()).unwrap_or("<unknown>");
 
-                    let doc = format!(
-                        "### Component `<{name}>`\n\n**File:** `{file_name}`\n\n**Parameters:**\n{params_doc}"
-                    );
+                    let doc =
+                        format!("### Component `<{name}>`\n\n**File:** `{file_name}`\n\n**Parameters:**\n{params_doc}");
 
                     (range, doc)
                 }
@@ -722,10 +636,7 @@ impl LanguageServer for Backend {
             };
 
             return Ok(Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: markdown,
-                }),
+                contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value: markdown }),
                 range: Some(range),
             }));
         }
@@ -734,8 +645,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
-        let cargo_toml_changed =
-            params.changes.iter().any(|event| event.uri.path().ends_with("/Cargo.toml"));
+        let cargo_toml_changed = params.changes.iter().any(|event| event.uri.path().ends_with("/Cargo.toml"));
 
         if !cargo_toml_changed {
             return;

@@ -8,11 +8,7 @@ pub struct SemanticTokensBuilder {
 
 impl SemanticTokensBuilder {
     pub fn new() -> Self {
-        Self {
-            tokens: Vec::new(),
-            prev_line: 0,
-            prev_char: 0,
-        }
+        Self { tokens: Vec::new(), prev_line: 0, prev_char: 0 }
     }
 
     pub fn push_token(&mut self, line: u32, char: u32, length: u32, token_type: u32, token_modifiers: u32) {

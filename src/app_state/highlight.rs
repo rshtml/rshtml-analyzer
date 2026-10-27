@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, ErrorCode};
-use tower_lsp::lsp_types::{
-    SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensEdit,
-};
+use tower_lsp::lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensEdit};
 use tracing::error;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
 
@@ -32,27 +30,15 @@ impl Highlight {
     }
 
     fn build_token_type_map() -> HashMap<SemanticTokenType, u32> {
-        SEMANTIC_TOKEN_TYPES
-            .iter()
-            .enumerate()
-            .map(|(i, token)| (token.clone(), i as u32))
-            .collect()
+        SEMANTIC_TOKEN_TYPES.iter().enumerate().map(|(i, token)| (token.clone(), i as u32)).collect()
     }
 
     #[allow(dead_code)]
     fn build_token_modifier_map() -> HashMap<SemanticTokenModifier, u32> {
-        SEMANTIC_TOKEN_MODIFIERS
-            .iter()
-            .enumerate()
-            .map(|(i, modifier)| (modifier.clone(), i as u32))
-            .collect()
+        SEMANTIC_TOKEN_MODIFIERS.iter().enumerate().map(|(i, modifier)| (modifier.clone(), i as u32)).collect()
     }
 
-    pub fn highlight(
-        &self,
-        source: &str,
-        range: Option<Range<usize>>,
-    ) -> Result<Vec<SemanticToken>, Error> {
+    pub fn highlight(&self, source: &str, range: Option<Range<usize>>) -> Result<Vec<SemanticToken>, Error> {
         if let Ok(mut highlighter) = self.highlighter.lock() {
             let highlight_events = highlighter
                 .highlight(&self.highlight_config, source.as_bytes(), None, None, |lang_name| {
@@ -112,13 +98,7 @@ impl Highlight {
                                 }
 
                                 let length = line_content.encode_utf16().count() as u32;
-                                builder.push_token(
-                                    current_line,
-                                    current_col,
-                                    length,
-                                    token_type,
-                                    token_modifiers,
-                                );
+                                builder.push_token(current_line, current_col, length, token_type, token_modifiers);
                             }
                         }
                     }
@@ -178,12 +158,7 @@ impl Highlight {
         self.token_type_map.get(&lsp_type_name).copied().unwrap_or(1)
     }
 
-    fn byte_to_line_col(
-        &self,
-        byte_offset: usize,
-        line_starts: &[usize],
-        source: &str,
-    ) -> (u32, u32) {
+    fn byte_to_line_col(&self, byte_offset: usize, line_starts: &[usize], source: &str) -> (u32, u32) {
         let line = line_starts.partition_point(|&start| start <= byte_offset) - 1;
 
         let line_start_byte = line_starts[line];
@@ -201,8 +176,7 @@ impl Highlight {
     ) -> Vec<SemanticTokensEdit> {
         const TOKEN_LEN: usize = 5;
 
-        let common_prefix_len =
-            old_tokens.iter().zip(new_tokens.iter()).take_while(|(old, new)| old == new).count();
+        let common_prefix_len = old_tokens.iter().zip(new_tokens.iter()).take_while(|(old, new)| old == new).count();
 
         if common_prefix_len == old_tokens.len() && common_prefix_len == new_tokens.len() {
             return vec![];
@@ -216,8 +190,7 @@ impl Highlight {
             .count();
 
         let start = (common_prefix_len * TOKEN_LEN) as u32;
-        let delete_count =
-            ((old_tokens.len() - common_prefix_len - common_suffix_len) * TOKEN_LEN) as u32;
+        let delete_count = ((old_tokens.len() - common_prefix_len - common_suffix_len) * TOKEN_LEN) as u32;
         let new_data_slice = &new_tokens[common_prefix_len..(new_tokens.len() - common_suffix_len)];
 
         let data = if new_data_slice.is_empty() { None } else { Some(new_data_slice.to_vec()) };

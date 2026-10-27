@@ -74,16 +74,8 @@ impl AppState {
         // )
         // .unwrap();
 
-        let mut cn: HashSet<String> = highlight_config
-            .names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let cnr: HashSet<String> = highlight_config_rust
-            .names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let mut cn: HashSet<String> = highlight_config.names().iter().map(|s| s.to_string()).collect();
+        let cnr: HashSet<String> = highlight_config_rust.names().iter().map(|s| s.to_string()).collect();
         // let cnh: HashSet<String> = highlight_config_html
         //     .names()
         //     .iter()
@@ -100,9 +92,7 @@ impl AppState {
         // highlight_config_html.configure(final_capture_names.as_ref());
 
         let mut highlights = Highlight::new(highlight_config, final_capture_names.clone());
-        highlights
-            .highlight_injects
-            .insert("rust", highlight_config_rust);
+        highlights.highlight_injects.insert("rust", highlight_config_rust);
         // highlights
         //     .highlight_injects
         //     .insert("html", highlight_config_html);
@@ -119,9 +109,7 @@ impl AppState {
             }
         }
 
-        let source_bytes = tokio::fs::read(use_full_uri.to_file_path().ok()?)
-            .await
-            .ok()?;
+        let source_bytes = tokio::fs::read(use_full_uri.to_file_path().ok()?).await.ok()?;
         let source = str::from_utf8(&source_bytes).ok()?;
 
         let mut parser = self.parser.lock().await;
@@ -156,9 +144,7 @@ impl AppState {
         let match_ = CompletionItem {
             label: "match".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(
-                "match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string(),
-            ),
+            insert_text: Some("match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("match statement".to_string()),
             sort_text: Some("03".to_string()),
@@ -178,9 +164,7 @@ impl AppState {
         let use_as_ = CompletionItem {
             label: "use .. as".to_string(),
             kind: Some(CompletionItemKind::SNIPPET),
-            insert_text: Some(
-                r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string(),
-            ),
+            insert_text: Some(r#"use "${1:path/to/component.rs.html}" as ${2:Component}"#.to_string()),
             insert_text_format: Some(InsertTextFormat::SNIPPET),
             detail: Some("use .. as directive".to_string()),
             sort_text: Some("06".to_string()),
@@ -227,16 +211,6 @@ impl AppState {
             ..Default::default()
         };
 
-        vec![
-            if_,
-            for_,
-            while_,
-            match_,
-            use_as_,
-            use_,
-            child_content_,
-            rust_block_,
-            rust_expr_paren_,
-        ]
+        vec![if_, for_, while_, match_, use_as_, use_, child_content_, rust_block_, rust_expr_paren_]
     }
 }

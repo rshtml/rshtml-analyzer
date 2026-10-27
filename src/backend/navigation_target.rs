@@ -5,17 +5,8 @@ use tree_sitter::Tree;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NavigationTarget {
-    Component {
-        name: String,
-        target_uri: Url,
-        range: Range,
-        params: Vec<String>,
-    },
-    UseDirective {
-        path: String,
-        target_uri: Url,
-        range: Range,
-    },
+    Component { name: String, target_uri: Url, range: Range, params: Vec<String> },
+    UseDirective { path: String, target_uri: Url, range: Range },
 }
 
 impl NavigationTarget {
@@ -34,16 +25,11 @@ impl NavigationTarget {
         let component_node = if node.kind() == "component_tag_identifier" {
             Some(node)
         } else {
-            node.parent()
-                .filter(|&parent| parent.kind() == "component_tag_identifier")
+            node.parent().filter(|&parent| parent.kind() == "component_tag_identifier")
         };
 
         if let Some(comp_node) = component_node {
-            let name = comp_node
-                .utf8_text(source.as_bytes())
-                .ok()?
-                .trim()
-                .to_string();
+            let name = comp_node.utf8_text(source.as_bytes()).ok()?.trim().to_string();
             let range = <Tree as TreeExtensions>::from_range(comp_node.range());
 
             for (use_path, use_alias, params) in use_directives {
@@ -64,12 +50,7 @@ impl NavigationTarget {
                 };
 
                 if let Some(target_uri) = target_uri {
-                    return Some(Self::Component {
-                        name,
-                        target_uri,
-                        range,
-                        params: params.clone(),
-                    });
+                    return Some(Self::Component { name, target_uri, range, params: params.clone() });
                 }
             }
         }
@@ -78,8 +59,7 @@ impl NavigationTarget {
         let string_node = if node.kind() == "string_line" {
             Some(node)
         } else {
-            node.parent()
-                .filter(|&parent| parent.kind() == "string_line")
+            node.parent().filter(|&parent| parent.kind() == "string_line")
         };
 
         if let Some(str_node) = string_node
@@ -87,9 +67,7 @@ impl NavigationTarget {
             && parent.kind() == "use_directive"
         {
             let raw_text = str_node.utf8_text(source.as_bytes()).ok()?;
-            let clean_path = raw_text
-                .trim()
-                .trim_matches(<Tree as TreeExtensions>::STRING_TRIMS);
+            let clean_path = raw_text.trim().trim_matches(<Tree as TreeExtensions>::STRING_TRIMS);
             let range = <Tree as TreeExtensions>::from_range(str_node.range());
 
             return Some(Self::UseDirective {
@@ -123,11 +101,8 @@ mod tests {
     <Button label="Click" />
     "#;
         let tree = parse_rshtml(source);
-        let use_directives = vec![(
-            "components/button.rs.html".to_string(),
-            Some("Button".to_string()),
-            vec!["label".to_string()],
-        )];
+        let use_directives =
+            vec![("components/button.rs.html".to_string(), Some("Button".to_string()), vec!["label".to_string()])];
         let view_uri = Url::parse("file:///project/views/").unwrap();
 
         // Position on <Button (line 3, col 5)
@@ -136,17 +111,9 @@ mod tests {
 
         assert!(target.is_some());
         match target.unwrap() {
-            NavigationTarget::Component {
-                name,
-                target_uri,
-                params,
-                ..
-            } => {
+            NavigationTarget::Component { name, target_uri, params, .. } => {
                 assert_eq!(name, "Button");
-                assert_eq!(
-                    target_uri,
-                    view_uri.join("components/button.rs.html").unwrap()
-                );
+                assert_eq!(target_uri, view_uri.join("components/button.rs.html").unwrap());
                 assert_eq!(params, vec!["label"]);
             }
             _ => panic!("Expected Component target"),
@@ -166,14 +133,9 @@ mod tests {
 
         assert!(target.is_some());
         match target.unwrap() {
-            NavigationTarget::UseDirective {
-                path, target_uri, ..
-            } => {
+            NavigationTarget::UseDirective { path, target_uri, .. } => {
                 assert_eq!(path, "components/button.rs.html");
-                assert_eq!(
-                    target_uri,
-                    view_uri.join("components/button.rs.html").unwrap()
-                );
+                assert_eq!(target_uri, view_uri.join("components/button.rs.html").unwrap());
             }
             _ => panic!("Expected UseDirective target"),
         }
