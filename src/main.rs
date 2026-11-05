@@ -1,12 +1,10 @@
 mod app_state;
-mod backend;
-mod consts;
+mod handler;
+mod language_server;
 mod rust_analyzer_client;
 
-use crate::app_state::AppState;
-use crate::backend::Backend;
 use clap::Parser;
-use tower_lsp::{LspService, Server};
+use lsp_server::Connection;
 
 #[derive(Parser)]
 struct Cli {
@@ -18,14 +16,15 @@ struct Cli {
 }
 
 #[cfg(debug_assertions)]
-use tracing::debug;
 
-#[tokio::main]
-async fn main() {
+pub const BUILD_MODE: &str = if cfg!(debug_assertions) { "dev/debug" } else { "release" };
+pub type Result<T, E = Box<dyn std::error::Error + Sync + Send>> = std::result::Result<T, E>;
+
+fn main() -> Result<()> {
     let cli = Cli::parse();
     if cli.version {
-        println!("rshtml-analyzer {} ({})", env!("CARGO_PKG_VERSION"), consts::BUILD_MODE);
-        return;
+        println!("rshtml-analyzer {} ({})", env!("CARGO_PKG_VERSION"), BUILD_MODE);
+        return Ok(());
     }
 
     let filter_level = if cfg!(debug_assertions) { tracing::Level::DEBUG } else { tracing::Level::INFO };
@@ -35,39 +34,35 @@ async fn main() {
     // If --stdio is specified or if built in release mode, default to stdio.
     // In debug builds without --stdio, default to TCP for debugging.
     if cli.stdio || !cfg!(debug_assertions) {
-        stdio_connection().await;
+        stdio_connection()?;
     } else {
         #[cfg(debug_assertions)]
-        tcp_connection().await;
+        tcp_connection()?;
     }
+
+    Ok(())
+}
+
+fn stdio_connection() -> Result<()> {
+    let (connection, io_threads) = Connection::stdio();
+    language_server::run(connection)?;
+    io_threads.join()?;
+    Ok(())
 }
 
 #[cfg(debug_assertions)]
-async fn tcp_connection() {
-    let addr = "127.0.0.1:9257";
+fn tcp_connection() -> Result<()> {
+    use tracing::debug;
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let addr = "127.0.0.1:9257";
     debug!("LSP server listens on TCP server: {}", addr);
 
-    loop {
-        let (stream, client_addr) = listener.accept().await.unwrap();
-        debug!("New client connected: {}", client_addr);
+    let (connection, io_threads) = Connection::listen(addr)?;
+    debug!("New client connected!");
 
-        let (service, socket) = LspService::new(|client| Backend::new(client, AppState::setup()));
+    language_server::run(connection)?;
+    io_threads.join()?;
+    debug!("Client session ended");
 
-        let (read, write) = tokio::io::split(stream);
-
-        tokio::spawn(async move {
-            Server::new(read, write, socket).serve(service).await;
-            debug!("Client session ended: {}", client_addr);
-        });
-    }
-}
-
-async fn stdio_connection() {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-
-    let (service, socket) = LspService::new(|client| Backend::new(client, AppState::setup()));
-    Server::new(stdin, stdout, socket).serve(service).await;
+    Ok(())
 }

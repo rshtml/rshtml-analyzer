@@ -19,7 +19,7 @@ impl Default for Workspace {
 }
 
 impl Workspace {
-    pub fn load(&mut self, root: &Path) -> Result<(), String> {
+    pub fn load(&mut self, root: PathBuf) -> Result<(), String> {
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).map_err(|e| e.to_string())?;
         let cargo_toml: Value = toml::from_str(&cargo_toml).map_err(|e| e.to_string())?;
 
@@ -47,6 +47,7 @@ impl Workspace {
             members.push(member);
         }
 
+        self.root = root;
         self.members = members;
 
         Ok(())

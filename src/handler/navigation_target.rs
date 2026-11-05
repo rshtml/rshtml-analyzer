@@ -1,12 +1,11 @@
-use crate::backend::Backend;
-use crate::backend::tree_extensions::TreeExtensions;
-use tower_lsp::lsp_types::{Position, Range, Url};
+use crate::handler::{tree_extensions::TreeExtensions, utils::position_to_byte_offset};
+use lsp_types::{Position, Range, Uri};
 use tree_sitter::Tree;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NavigationTarget {
-    Component { name: String, target_uri: Url, range: Range, params: Vec<String> },
-    UseDirective { path: String, target_uri: Url, range: Range },
+    Component { name: String, target_uri: Uri, range: Range, params: Vec<String> },
+    UseDirective { path: String, target_uri: Uri, range: Range },
 }
 
 impl NavigationTarget {
@@ -15,9 +14,9 @@ impl NavigationTarget {
         source: &str,
         position: Position,
         use_directives: &[(String, Option<String>, Vec<String>)],
-        view_uri: &Url,
+        view_uri: &Uri,
     ) -> Option<Self> {
-        let byte_offset = Backend::position_to_byte_offset(source, position);
+        let byte_offset = position_to_byte_offset(source, position);
         let root = tree.root_node();
         let node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
 
@@ -103,7 +102,7 @@ mod tests {
         let tree = parse_rshtml(source);
         let use_directives =
             vec![("components/button.rs.html".to_string(), Some("Button".to_string()), vec!["label".to_string()])];
-        let view_uri = Url::parse("file:///project/views/").unwrap();
+        let view_uri = Uri::parse("file:///project/views/").unwrap();
 
         // Position on <Button (line 3, col 5)
         let pos = Position::new(3, 5);
@@ -125,7 +124,7 @@ mod tests {
         let source = r#"@use "components/button.rs.html" as Button"#;
         let tree = parse_rshtml(source);
         let use_directives = vec![];
-        let view_uri = Url::parse("file:///project/views/").unwrap();
+        let view_uri = Uri::parse("file:///project/views/").unwrap();
 
         // Position inside "components/button.rs.html" (line 0, col 10)
         let pos = Position::new(0, 10);

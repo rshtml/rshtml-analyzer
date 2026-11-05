@@ -1,7 +1,6 @@
 use crate::app_state::view::Snippet;
-use tower_lsp::lsp_types;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
-use tracing::error;
+use lsp_types::{Diagnostic, DiagnosticSeverity};
+use tracing::debug;
 use tree_sitter::{Language, Query, QueryCursor, QueryMatch, Range, StreamingIterator};
 
 pub trait TreeExtensions {
@@ -71,7 +70,7 @@ impl TreeExtensions for tree_sitter::Tree {
             Some((use_path, use_alias))
         })
         .unwrap_or_else(|x| {
-            error!("Error during use_path query: {}", x);
+            debug!("Error during use_path query: {}", x);
             vec![]
         })
     }
@@ -90,7 +89,7 @@ impl TreeExtensions for tree_sitter::Tree {
         .ok()
         .map(|results| results.into_iter().flatten().collect::<Vec<String>>())
         .unwrap_or_else(|| {
-            error!("Error during template params query");
+            debug!("Error during template params query");
             vec![]
         })
     }
@@ -107,7 +106,7 @@ impl TreeExtensions for tree_sitter::Tree {
             };
 
             let range = Self::from_range(range);
-            let severity = Some(DiagnosticSeverity::ERROR);
+            let severity = Some(DiagnosticSeverity::Error);
 
             let message = if node.is_missing() {
                 format!("Missing `{}`", node.kind().replace('_', " "))
@@ -115,12 +114,12 @@ impl TreeExtensions for tree_sitter::Tree {
                 format!("Syntax error in `{}`", node.utf8_text(source.as_bytes()).ok()?)
             };
 
-            let diagnostic = Diagnostic { range, message, severity, ..Default::default() };
+            let diagnostic = Diagnostic { range, message: message.into(), severity, ..Default::default() };
 
             Some(diagnostic)
         })
         .unwrap_or_else(|err| {
-            error!("Error during error query: {}", err);
+            debug!("Error during error query: {}", err);
             vec![]
         })
     }
@@ -193,7 +192,7 @@ impl TreeExtensions for tree_sitter::Tree {
             }
         })
         .unwrap_or_else(|x| {
-            error!("Error during extract query: {}", x);
+            debug!("Error during extract query: {}", x);
             vec![]
         })
     }
@@ -275,7 +274,7 @@ pub mod tests {
             "Incomplete directive should produce diagnostics, tree was: {}",
             tree.root_node().to_sexp()
         );
-        assert_eq!(errors[0].severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(errors[0].severity, Some(DiagnosticSeverity::Error));
     }
 
     #[test]

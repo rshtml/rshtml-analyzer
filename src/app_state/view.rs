@@ -1,11 +1,12 @@
 mod extract;
 
-use crate::backend::tree_extensions::TreeExtensions;
 use extract::Extract;
 pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
+use lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Uri};
 use std::collections::{HashMap, HashSet};
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url};
 use tree_sitter::{Language, Tree};
+
+use crate::handler::tree_extensions::TreeExtensions;
 
 pub struct View {
     pub source: String,
@@ -13,23 +14,19 @@ pub struct View {
     pub use_directives: Vec<(String, Option<String>, Vec<String>)>,
     pub template_params: Vec<String>,
     pub completion_items: HashMap<String, (char, CompletionItem)>,
-    pub semantic_tokens: SemanticTokens,
-    pub semantic_tokens_version: u64,
-    pub extract_file: Option<Url>,
+    pub extract_file: Option<Uri>,
 
     pub version: usize,
 }
 
 impl View {
-    pub fn new(source: String, tree: Tree, version: usize, extract_file: Option<Url>) -> Self {
+    pub fn new(source: String, tree: Tree, version: usize, extract_file: Option<Uri>) -> Self {
         Self {
             source,
             tree,
             use_directives: Vec::new(),
             template_params: Vec::new(),
             completion_items: HashMap::new(),
-            semantic_tokens: SemanticTokens::default(),
-            semantic_tokens_version: 0,
             extract_file,
             version,
         }
@@ -81,9 +78,9 @@ impl View {
 
         let tag_item = CompletionItem {
             label: use_name.to_owned(),
-            kind: Some(CompletionItemKind::STRUCT),
+            kind: Some(CompletionItemKind::Struct),
             detail: Some(format!("{use_name} component")),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            insert_text_format: Some(InsertTextFormat::Snippet),
             insert_text: Some(if snippet_params.is_empty() {
                 format!("{use_name}/>")
             } else {
