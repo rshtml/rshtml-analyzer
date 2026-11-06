@@ -9,11 +9,8 @@ pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
 use lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position, TextDocumentContentChangeEvent, Uri};
 pub use navigation_target::NavigationTarget;
 use position_to_byte_offset::position_to_byte_offset;
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
+use std::{fs, path::PathBuf};
 pub use syntax_context::SyntaxContext;
 use tracing::debug;
 use tree_sitter::{Language, Point, Tree};
@@ -202,8 +199,6 @@ impl View {
         NavigationTarget::resolve_at(&self.tree, &self.source, position, &self.use_directives, uri)
     }
 
-    #[allow(dead_code)]
-    #[cfg(debug_assertions)]
     pub fn debug_check_source_mismatch(&self, language: &Language, extract_file: Option<&(Uri, PathBuf)>) {
         let extract_source = self.extract_source(language);
 
