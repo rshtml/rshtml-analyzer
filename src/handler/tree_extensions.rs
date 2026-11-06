@@ -18,6 +18,7 @@ pub trait TreeExtensions {
 
     fn extract_snippets(&self, language: &Language, source: &str) -> Vec<Snippet>;
 
+    #[allow(clippy::cast_possible_truncation)]
     fn from_range(range: Range) -> lsp_types::Range {
         let start_point = range.start_point;
         let end_point = range.end_point;
@@ -86,12 +87,13 @@ impl TreeExtensions for tree_sitter::Tree {
             }
             Some(param_names)
         })
-        .ok()
-        .map(|results| results.into_iter().flatten().collect::<Vec<String>>())
-        .unwrap_or_else(|| {
-            debug!("Error during template params query");
-            vec![]
-        })
+        .map_or_else(
+            |e| {
+                debug!("Error during template params query: {e}");
+                vec![]
+            },
+            |results| results.into_iter().flatten().collect::<Vec<String>>(),
+        )
     }
 
     fn find_error(&self, language: &Language, source: &str) -> Vec<Diagnostic> {
@@ -179,7 +181,7 @@ impl TreeExtensions for tree_sitter::Tree {
                 }
                 "child_content_" | "continue_" | "break_" => Some(Snippet::Directive(range, text)),
                 "rust_text" => {
-                    let parent_kind = node.parent().map(|p| p.kind()).unwrap_or("");
+                    let parent_kind = node.parent().map_or("", |p| p.kind());
 
                     match parent_kind {
                         "param" => None,

@@ -21,7 +21,7 @@ use lsp_types::{
 };
 use tracing::debug;
 
-pub fn initialize(conn: &Connection, state: &mut AppState, params: InitializeParams) -> Result<()> {
+pub fn initialize(conn: &Connection, state: &mut AppState, params: &InitializeParams) -> Result<()> {
     debug!("The Initialize request has been received (build: {})...", BUILD_MODE);
 
     let workspace_root_uri = params
@@ -37,8 +37,8 @@ pub fn initialize(conn: &Connection, state: &mut AppState, params: InitializePar
     debug!("workspace root uri: {:?}", workspace_root_uri);
 
     if let Some(path) = workspace_root_uri.as_ref().and_then(|uri| uri.to_file_path().ok()) {
-        debug!("Workspace root path: {:?}", path);
-        log_message(&conn.sender, MessageType::Info, format!("Workspace root path: {path:?}"))?;
+        debug!("Workspace root path: {}", path.display());
+        log_message(&conn.sender, MessageType::Info, format!("Workspace root path: {}", path.display()))?;
 
         state.workspace.load(path).unwrap_or_else(|e| {
             debug!("Workspace couldn't load: {}, operating in single-file mode", e);
@@ -103,7 +103,7 @@ pub fn did_open(conn: &Connection, state: &mut AppState, params: DidOpenTextDocu
             .text_document
             .uri
             .to_file_path()
-            .map_err(|_| {
+            .map_err(|()| {
                 debug!("invalid uri: {}", &params.text_document.uri);
             })
             .ok()?;
@@ -115,7 +115,7 @@ pub fn did_open(conn: &Connection, state: &mut AppState, params: DidOpenTextDocu
             .ok()?;
 
         let extract_file_uri = Uri::from_file_path(&extract_file_path)
-            .map_err(|_| debug!("Couldn't convert file to uri: {:?}", extract_file_path))
+            .map_err(|()| debug!("Couldn't convert file to uri: {:?}", extract_file_path))
             .ok()?;
 
         Some((extract_file_uri, extract_file_path))
@@ -123,9 +123,9 @@ pub fn did_open(conn: &Connection, state: &mut AppState, params: DidOpenTextDocu
 
     let errors = {
         let mut view = View::new(
-            text.to_owned(),
-            tree.to_owned(),
-            params.text_document.version as usize,
+            text.clone(),
+            tree.clone(),
+            params.text_document.version,
             extract_file.as_ref().map(|x| x.0.clone()),
         );
         view.use_directives = use_directives_with_params;
@@ -135,7 +135,7 @@ pub fn did_open(conn: &Connection, state: &mut AppState, params: DidOpenTextDocu
         let errors = view.tree.find_error(&state.language, &view.source);
 
         if cfg!(debug_assertions) {
-            view.debug_check_source_mismatch(&state.language, &extract_file);
+            view.debug_check_source_mismatch(&state.language, extract_file.as_ref());
         }
 
         state.views.insert(uri_str, view);
@@ -168,7 +168,7 @@ pub fn did_change(conn: &Connection, state: &mut AppState, params: DidChangeText
     let uri = params.text_document.text_document_identifier.uri;
     let version = params.text_document.version;
 
-    let msg = format!("Changed file: {}", uri);
+    let msg = format!("Changed file: {uri}");
     log_message(&conn.sender, MessageType::Info, msg)?;
 
     let uri_str = uri.to_string();
@@ -179,7 +179,7 @@ pub fn did_change(conn: &Connection, state: &mut AppState, params: DidChangeText
             return Ok(());
         };
 
-        if view.version >= version as usize {
+        if view.version >= version {
             return Ok(());
         }
 
@@ -193,7 +193,7 @@ pub fn did_change(conn: &Connection, state: &mut AppState, params: DidChangeText
         let use_directives = tree.find_uses(&state.language, &view.source);
         let template_params = tree.find_template_params(&state.language, &view.source);
 
-        view.version = version as usize;
+        view.version = version;
         view.tree = tree;
         let new_uses = view.sync_use_directives(use_directives);
 
@@ -224,7 +224,7 @@ pub fn did_change(conn: &Connection, state: &mut AppState, params: DidChangeText
 
         let extract_source = view.extract_source(&state.language);
 
-        Some((view.extract_file.to_owned(), extract_source))
+        Some((view.extract_file.clone(), extract_source))
     } else {
         None
     };
@@ -263,7 +263,7 @@ pub fn did_close(conn: &Connection, state: &mut AppState, params: DidCloseTextDo
     Ok(())
 }
 
-pub fn did_save(_conn: &Connection, state: &mut AppState, params: DidSaveTextDocumentParams) -> Result<()> {
+pub fn did_save(_conn: &Connection, state: &mut AppState, params: &DidSaveTextDocumentParams) {
     debug!("(DID SAVE) triggered for file: {}", params.text_document.uri);
 
     let _ = (|| -> Option<()> {
@@ -286,28 +286,28 @@ pub fn did_save(_conn: &Connection, state: &mut AppState, params: DidSaveTextDoc
 
         Some(())
     })();
-
-    Ok(())
 }
 
-pub fn completion(state: &mut AppState, params: CompletionParams) -> Option<CompletionResponse> {
-    let uri = params.text_document_position_params.text_document.uri.as_str();
-    let position = params.text_document_position_params.position;
-    let trigger_char =
-        params.context.as_ref().and_then(|ctx| ctx.trigger_character.as_ref()).and_then(|s| s.chars().next());
+pub mod completion {
+    #[allow(clippy::wildcard_imports)]
+    use super::*;
 
-    let mut shift = FIRST_LINE_SHIFT;
+    pub fn completion(state: &mut AppState, params: &CompletionParams) -> Option<CompletionResponse> {
+        let uri = params.text_document_position_params.text_document.uri.as_str();
+        let position = params.text_document_position_params.position;
+        let trigger_char =
+            params.context.as_ref().and_then(|ctx| ctx.trigger_character.as_ref()).and_then(|s| s.chars().next());
 
-    let (mut completion_items, extract_file) = {
+        let mut shift = FIRST_LINE_SHIFT;
+
         let Some(view) = state.views.get(uri) else {
             debug!("Error while getting completion items");
             return None;
         };
-
         let syntax_context = view.detect_syntax_context(position);
-        let mut completion_items: Vec<CompletionItem> = Vec::new();
-
         debug!("(COMPLETION) ctx: {:?}, pos: {:?}", syntax_context, position);
+
+        let mut completion_items: Vec<CompletionItem> = Vec::new();
 
         let extract_file: Option<Uri> = if syntax_context == SyntaxContext::Html {
             if let Some(tc) = trigger_char {
@@ -373,16 +373,41 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Option<Comp
         };
 
         debug!("Extract File: {:?}", extract_file);
-        (completion_items, extract_file)
-    };
 
-    let ra_items = (|| -> Option<Vec<CompletionItem>> {
+        let ra_items = fetch_ra_items(state, params, extract_file, shift);
+
+        if let Some(tg) = trigger_char
+            && tg == '@'
+        {
+            completion_items.extend(ra_items.into_iter().flatten().filter(|item| match item.kind {
+                Some(CompletionItemKind::Variable) => true,
+                Some(CompletionItemKind::Function) => {
+                    ["json(...)", "json_let(...)", "time(...)"].contains(&item.label.as_str())
+                }
+                _ => false,
+            }));
+        } else {
+            completion_items.extend(ra_items.into_iter().flatten());
+        }
+
+        Some(CompletionResponse::CompletionList(CompletionList {
+            is_incomplete: true,
+            items: completion_items,
+            ..Default::default()
+        }))
+    }
+
+    fn fetch_ra_items(
+        state: &AppState,
+        params: &CompletionParams,
+        extract_file: Option<Uri>,
+        shift: u32,
+    ) -> Option<Vec<CompletionItem>> {
         let mut ra_params = params.clone();
-        let extract_file_uri = extract_file?;
-        ra_params.text_document_position_params.text_document.uri = extract_file_uri;
+        ra_params.text_document_position_params.text_document.uri = extract_file?;
 
         if ra_params.text_document_position_params.position.line == 0 {
-            ra_params.text_document_position_params.position.character += shift as u32;
+            ra_params.text_document_position_params.position.character += shift;
         }
 
         let ra_client = state.ra_client.as_ref()?;
@@ -405,29 +430,9 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Option<Comp
             CompletionResponse::CompletionList(completion_list) => completion_list.items,
         };
 
-        unshift(&mut items, shift as u32);
+        unshift(&mut items, shift);
         Some(items)
-    })();
-
-    if let Some(tg) = trigger_char
-        && tg == '@'
-    {
-        completion_items.extend(ra_items.into_iter().flatten().filter(|item| match item.kind {
-            Some(CompletionItemKind::Variable) => true,
-            Some(CompletionItemKind::Function) => {
-                ["json(...)", "json_let(...)", "time(...)"].contains(&item.label.as_str())
-            }
-            _ => false,
-        }));
-    } else {
-        completion_items.extend(ra_items.into_iter().flatten());
     }
-
-    return Some(CompletionResponse::CompletionList(CompletionList {
-        is_incomplete: true,
-        items: completion_items,
-        ..Default::default()
-    }));
 
     fn unshift(items: &mut [CompletionItem], shift: u32) {
         for item in items {

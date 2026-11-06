@@ -2,8 +2,8 @@ use crate::{
     BUILD_MODE, Result,
     app_state::AppState,
     handler::{
-        completion, did_change, did_change_watched_files, did_close, did_open, did_save, goto_definition, hover,
-        initialize, initialized,
+        completion::completion, did_change, did_change_watched_files, did_close, did_open, did_save, goto_definition,
+        hover, initialize, initialized,
     },
 };
 use crossbeam_channel::Sender;
@@ -26,7 +26,7 @@ pub fn run(connection: &Connection) -> Result<()> {
 
     let mut state = AppState::setup();
 
-    initialize(connection, &mut state, init_params)?;
+    initialize(connection, &mut state, &init_params)?;
 
     debug!("Sending an initialize response.");
     connection.initialize_finish(id, to_value(initialize_result())?)?;
@@ -107,7 +107,7 @@ fn handle_notification(conn: &Connection, note: &Notification, state: &mut AppSt
     match note.method.as_str().into() {
         DidOpenTextDocumentNotification::METHOD => did_open(conn, state, from_value(note.params.clone())?)?,
         DidChangeTextDocumentNotification::METHOD => did_change(conn, state, from_value(note.params.clone())?)?,
-        DidSaveTextDocumentNotification::METHOD => did_save(conn, state, from_value(note.params.clone())?)?,
+        DidSaveTextDocumentNotification::METHOD => did_save(conn, state, &from_value(note.params.clone())?),
         DidCloseTextDocumentNotification::METHOD => did_close(conn, state, from_value(note.params.clone())?)?,
         DidChangeWatchedFilesNotification::METHOD => did_change_watched_files(state, &from_value(note.params.clone())?),
         _ => {}
@@ -127,7 +127,7 @@ fn handle_request(conn: &Connection, req: &Request, state: &mut AppState) -> Res
             send_ok(&conn.sender, req.id.clone(), &response)?;
         }
         CompletionRequest::METHOD => {
-            let response = completion(state, from_value(req.params.clone())?);
+            let response = completion(state, &from_value(req.params.clone())?);
             send_ok(&conn.sender, req.id.clone(), &response)?;
         }
         _ => {

@@ -42,119 +42,127 @@ impl RustAnalyzerClient {
         let uri_map_clone = uri_map.clone();
 
         std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
+            Self::read_loop(stdout, &stdin_for_reader, &pending_requests_clone, &uri_map_clone, &sender);
+        });
 
-            loop {
-                let mut line = String::new();
+        Some(Self { stdin, next_id: AtomicU64::new(1), pending_requests, uri_map })
+    }
 
-                match reader.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
+    fn read_loop(
+        stdout: std::process::ChildStdout,
+        stdin: &Mutex<ChildStdin>,
+        pending_requests: &Mutex<HashMap<u64, Sender<Value>>>,
+        uri_map: &Mutex<HashMap<Uri, Uri>>,
+        sender: &Sender<Message>,
+    ) {
+        let mut reader = BufReader::new(stdout);
+
+        loop {
+            let mut line = String::new();
+
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+
+            if line.starts_with("Content-Length:") {
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() < 2 {
+                    continue;
                 }
 
-                if line.starts_with("Content-Length:") {
-                    let parts: Vec<&str> = line.split(':').collect();
-                    if parts.len() < 2 {
-                        continue;
-                    }
+                let len: usize = match parts[1].trim().parse() {
+                    Ok(l) => l,
+                    Err(_) => continue,
+                };
 
-                    let len: usize = match parts[1].trim().parse() {
-                        Ok(l) => l,
-                        Err(_) => continue,
-                    };
+                line.clear();
+                if reader.read_line(&mut line).is_err() {
+                    break;
+                }
 
-                    line.clear();
-                    if reader.read_line(&mut line).is_err() {
-                        break;
-                    }
+                let mut body = vec![0; len];
+                if reader.read_exact(&mut body).is_err() {
+                    break;
+                }
 
-                    let mut body = vec![0; len];
-                    if reader.read_exact(&mut body).is_err() {
-                        break;
-                    }
+                if let Ok(json) = serde_json::from_slice::<Value>(&body) {
+                    let id = json.get("id").cloned();
+                    let method = json.get("method").and_then(|m| m.as_str()).map(str::to_owned);
 
-                    if let Ok(json) = serde_json::from_slice::<Value>(&body) {
-                        let id = json.get("id").cloned();
-                        let method = json.get("method").and_then(|m| m.as_str()).map(str::to_owned);
-
-                        match (id, method) {
-                            (Some(id), Some(method)) => {
-                                let result = if method == "workspace/configuration" {
-                                    debug!("RA sent a pull request for the configs.");
-                                    let n = json["params"]["items"].as_array().map_or(1, Vec::len);
-                                    let cfg = json!({
-                                        "rust": { "analyzerTargetDir": true }
-                                    });
-                                    Value::Array(vec![cfg; n])
-                                } else {
-                                    debug!("RA request received: {}", method);
-                                    Value::Null
-                                };
-
-                                let response = json!({
-                                    "jsonrpc": "2.0",
-                                    "id": id,
-                                    "result": result
+                    match (id, method) {
+                        (Some(id), Some(method)) => {
+                            let result = if method == "workspace/configuration" {
+                                debug!("RA sent a pull request for the configs.");
+                                let n = json["params"]["items"].as_array().map_or(1, Vec::len);
+                                let cfg = json!({
+                                    "rust": { "analyzerTargetDir": true }
                                 });
-                                let s = response.to_string();
-                                let msg = format!("Content-Length: {}\r\n\r\n{}", s.len(), s);
+                                Value::Array(vec![cfg; n])
+                            } else {
+                                debug!("RA request received: {}", method);
+                                Value::Null
+                            };
 
-                                if let Ok(mut w) = stdin_for_reader.lock() {
-                                    let _ = w.write_all(msg.as_bytes());
-                                    let _ = w.flush();
-                                }
+                            let response = json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "result": result
+                            });
+                            let s = response.to_string();
+                            let msg = format!("Content-Length: {}\r\n\r\n{}", s.len(), s);
+
+                            if let Ok(mut w) = stdin.lock() {
+                                let _ = w.write_all(msg.as_bytes());
+                                let _ = w.flush();
                             }
-                            (Some(id), None) => {
-                                if let Some(id) = id.as_u64()
-                                    && let Ok(mut pending) = pending_requests_clone.lock()
-                                    && let Some(tx) = pending.remove(&id)
+                        }
+                        (Some(id), None) => {
+                            if let Some(id) = id.as_u64()
+                                && let Ok(mut pending) = pending_requests.lock()
+                                && let Some(tx) = pending.remove(&id)
+                            {
+                                let _ = tx.send(json);
+                            }
+                        }
+                        (None, Some(method)) => {
+                            if method == "textDocument/publishDiagnostics" {
+                                if let Some(params) = json.get("params")
+                                    && let Ok(diag_params) =
+                                        serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
                                 {
-                                    let _ = tx.send(json);
-                                }
-                            }
-                            (None, Some(method)) => {
-                                if method == "textDocument/publishDiagnostics" {
-                                    if let Some(params) = json.get("params")
-                                        && let Ok(diag_params) =
-                                            serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
-                                    {
-                                        debug!("RA Diagnostics Received:\n{:#?}", params);
+                                    debug!("RA Diagnostics Received:\n{:#?}", params);
 
-                                        let original_uri = uri_map_clone
-                                            .lock()
-                                            .ok()
-                                            .and_then(|map| map.get(&diag_params.uri).cloned());
+                                    let original_uri =
+                                        uri_map.lock().ok().and_then(|map| map.get(&diag_params.uri).cloned());
 
-                                        if let Some(html_uri) = original_uri {
-                                            debug!("RA diagnostics will send to editor, Uri: {:#?}", html_uri);
+                                    if let Some(html_uri) = original_uri {
+                                        debug!("RA diagnostics will send to editor, Uri: {:#?}", html_uri);
 
-                                            let _ = crate::language_server::publish_diagnostics(
-                                                &sender,
-                                                &html_uri,
-                                                diag_params.diagnostics,
-                                                diag_params.version,
-                                            );
-                                        }
+                                        let _ = crate::language_server::publish_diagnostics(
+                                            sender,
+                                            &html_uri,
+                                            diag_params.diagnostics,
+                                            diag_params.version,
+                                        );
                                     }
-                                } else if method == "window/showMessage"
-                                    || method == "window/logMessage"
-                                    || method == "experimental/serverStatus"
-                                {
-                                    debug!("RA {}: {:#?}", method, json.get("params"));
-                                } else {
-                                    debug!("RA notification: {}", method);
                                 }
+                            } else if method == "window/showMessage"
+                                || method == "window/logMessage"
+                                || method == "experimental/serverStatus"
+                            {
+                                debug!("RA {}: {:#?}", method, json.get("params"));
+                            } else {
+                                debug!("RA notification: {}", method);
                             }
-                            _ => {
-                                debug!("RA unknown message:\n{:#?}", json);
-                            }
+                        }
+                        _ => {
+                            debug!("RA unknown message:\n{:#?}", json);
                         }
                     }
                 }
             }
-        });
-
-        Some(Self { stdin, next_id: AtomicU64::new(1), pending_requests, uri_map })
+        }
     }
 
     fn send_notification(&self, method: &str, params: &Value) {

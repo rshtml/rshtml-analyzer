@@ -26,11 +26,11 @@ pub struct View {
     pub completion_items: HashMap<String, (char, CompletionItem)>,
     pub extract_file: Option<Uri>,
 
-    pub version: usize,
+    pub version: i32,
 }
 
 impl View {
-    pub fn new(source: String, tree: Tree, version: usize, extract_file: Option<Uri>) -> Self {
+    pub fn new(source: String, tree: Tree, version: i32, extract_file: Option<Uri>) -> Self {
         Self {
             source,
             tree,
@@ -143,7 +143,7 @@ impl View {
                             column: range.start.character as usize,
                         },
                         old_end_position: Point { row: range.end.line as usize, column: range.end.character as usize },
-                        new_end_position: self.calculate_new_end_point(range.start, &partial.text),
+                        new_end_position: Self::calculate_new_end_point(range.start, &partial.text),
                     };
 
                     self.tree.edit(&edit);
@@ -158,7 +158,7 @@ impl View {
         }
     }
 
-    fn calculate_new_end_point(&self, start_pos: Position, text: &str) -> Point {
+    fn calculate_new_end_point(start_pos: Position, text: &str) -> Point {
         let mut new_pos = Point { row: start_pos.line as usize, column: start_pos.character as usize };
 
         for (i, line) in text.lines().enumerate() {
@@ -204,7 +204,7 @@ impl View {
 
     #[allow(dead_code)]
     #[cfg(debug_assertions)]
-    pub fn debug_check_source_mismatch(&self, language: &Language, extract_file: &Option<(Uri, PathBuf)>) {
+    pub fn debug_check_source_mismatch(&self, language: &Language, extract_file: Option<&(Uri, PathBuf)>) {
         let extract_source = self.extract_source(language);
 
         if let Some((_, extract_file_path)) = extract_file {
@@ -212,7 +212,9 @@ impl View {
                 return;
             };
 
-            if extract_source != extract_text {
+            if extract_source == extract_text {
+                debug!("(DEBUG CHECK) sources matched perfectly");
+            } else {
                 debug!("(DEBUG CHECK) SOURCES MISMATCH! Analyzing differences...");
                 let extracted_lines: Vec<&str> = extract_source.lines().collect();
                 let extract_lines: Vec<&str> = extract_text.lines().collect();
@@ -226,11 +228,8 @@ impl View {
                         debug!("Difference found at Line {}:", i + 1);
                         debug!("  Extract (RAM): {:?}", e_line);
                         debug!("  Extract (Disk)  : {:?}", m_line);
-                        continue;
                     }
                 }
-            } else {
-                debug!("(DEBUG CHECK) sources matched perfectly");
             }
         }
     }

@@ -40,7 +40,7 @@ impl Workspace {
                 members.push(member);
             }
         } else {
-            let member = Member { path: root.to_path_buf() };
+            let member = Member { path: root.clone() };
 
             debug!("MEMBER PATH: {}", member.path.to_string_lossy().to_string());
 
@@ -56,22 +56,22 @@ impl Workspace {
     pub fn find_root_and_relative_path(&self, path: &Path) -> (PathBuf, PathBuf) {
         for member in &self.members {
             if let Ok(rel_path) = path.strip_prefix(&member.path) {
-                return (member.path.to_owned(), rel_path.to_path_buf());
+                return (member.path.clone(), rel_path.to_path_buf());
             }
         }
 
         if let Ok(rel_path) = path.strip_prefix(&self.root) {
-            return (self.root.to_owned(), rel_path.to_path_buf());
+            return (self.root.clone(), rel_path.to_path_buf());
         }
 
-        (self.root.to_owned(), path.to_path_buf())
+        (self.root.clone(), path.to_path_buf())
     }
 
     pub fn generate_extract_file_path(&self, path: &Path) -> io::Result<PathBuf> {
         let (root_path, relative_path) = self.find_root_and_relative_path(path);
 
-        let manifest_dir =
-            fs::canonicalize(&root_path).map_err(|e| io::Error::new(e.kind(), format!("{root_path:?}: {e}")))?;
+        let manifest_dir = fs::canonicalize(&root_path)
+            .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", root_path.display())))?;
 
         let mut target_path = manifest_dir.join(".rshtml");
 

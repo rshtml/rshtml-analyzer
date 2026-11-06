@@ -27,10 +27,12 @@ const PREFIX: &[u8] = b"fn render(child_content: impl ::rshtml::View,";
 const PREFIX_NO_PARAMS: &[u8] = b"fn render(child_content: impl ::rshtml::View)->::std::fmt::Result{";
 const POSTFIX: &[u8] = b"->::std::fmt::Result{";
 
-const _: () = assert!(PREFIX_NO_PARAMS.len() == FIRST_LINE_SHIFT);
+const _: () = assert!(PREFIX_NO_PARAMS.len() == FIRST_LINE_SHIFT as usize);
 
-pub const PARAMS_SHIFT: usize = PREFIX.len();
-pub const FIRST_LINE_SHIFT: usize = PREFIX.len() + POSTFIX.len();
+#[allow(clippy::cast_possible_truncation)]
+pub const PARAMS_SHIFT: u32 = PREFIX.len() as u32;
+#[allow(clippy::cast_possible_truncation)]
+pub const FIRST_LINE_SHIFT: u32 = (PREFIX.len() + POSTFIX.len()) as u32;
 
 #[derive(Debug, Default, Clone)]
 pub struct Extract {
@@ -60,15 +62,15 @@ impl Extract {
         for snippet in snippets {
             match snippet {
                 Snippet::Directive(range, expr) => {
-                    let expr = format!("{};", expr);
+                    let expr = format!("{expr};");
                     self.source_replace(&expr, range.start - 1);
                 }
                 Snippet::ExprParen(range, expr) => {
-                    let expr = format!("&{};", expr);
+                    let expr = format!("&{expr};");
                     self.source_replace(&expr, range.start - 1);
                 }
                 Snippet::ExprSimple(range, expr) => {
-                    let expr = format!("&{};", expr);
+                    let expr = format!("&{expr};");
                     self.source_replace_insert(expr.as_str(), range.start - 1);
                 }
                 Snippet::Statement(range, block) => {
@@ -101,7 +103,7 @@ impl Extract {
         }
 
         if let Some(range) = params_range {
-            let mut out = Vec::with_capacity(self.source.len() + FIRST_LINE_SHIFT);
+            let mut out = Vec::with_capacity(self.source.len() + FIRST_LINE_SHIFT as usize);
 
             out.extend_from_slice(PREFIX);
             out.extend_from_slice(&self.source[..range.start]);
