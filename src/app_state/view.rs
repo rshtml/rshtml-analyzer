@@ -1,11 +1,19 @@
 mod extract;
+mod navigation_target;
+mod position_to_byte_offset;
+mod syntax_context;
 
-use crate::backend::tree_extensions::TreeExtensions;
+use crate::handler::tree_extensions::TreeExtensions;
 use extract::Extract;
 pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
+use lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position, TextDocumentContentChangeEvent, Uri};
+pub use navigation_target::NavigationTarget;
+use position_to_byte_offset::position_to_byte_offset;
 use std::collections::{HashMap, HashSet};
-use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, SemanticTokens, Url};
-use tree_sitter::{Language, Tree};
+use std::{fs, path::PathBuf};
+pub use syntax_context::SyntaxContext;
+use tracing::debug;
+use tree_sitter::{Language, Point, Tree};
 
 pub struct View {
     pub source: String,
@@ -13,23 +21,19 @@ pub struct View {
     pub use_directives: Vec<(String, Option<String>, Vec<String>)>,
     pub template_params: Vec<String>,
     pub completion_items: HashMap<String, (char, CompletionItem)>,
-    pub semantic_tokens: SemanticTokens,
-    pub semantic_tokens_version: u64,
-    pub extract_file: Option<Url>,
+    pub extract_file: Option<Uri>,
 
-    pub version: usize,
+    pub version: i32,
 }
 
 impl View {
-    pub fn new(source: String, tree: Tree, version: usize, extract_file: Option<Url>) -> Self {
+    pub fn new(source: String, tree: Tree, version: i32, extract_file: Option<Uri>) -> Self {
         Self {
             source,
             tree,
             use_directives: Vec::new(),
             template_params: Vec::new(),
             completion_items: HashMap::new(),
-            semantic_tokens: SemanticTokens::default(),
-            semantic_tokens_version: 0,
             extract_file,
             version,
         }
@@ -81,9 +85,9 @@ impl View {
 
         let tag_item = CompletionItem {
             label: use_name.to_owned(),
-            kind: Some(CompletionItemKind::STRUCT),
+            kind: Some(CompletionItemKind::Struct),
             detail: Some(format!("{use_name} component")),
-            insert_text_format: Some(InsertTextFormat::SNIPPET),
+            insert_text_format: Some(InsertTextFormat::Snippet),
             insert_text: Some(if snippet_params.is_empty() {
                 format!("{use_name}/>")
             } else {
@@ -119,6 +123,53 @@ impl View {
         }
     }
 
+    pub fn process_changes(&mut self, content_changes: Vec<TextDocumentContentChangeEvent>) {
+        for change in content_changes {
+            match change {
+                TextDocumentContentChangeEvent::TextDocumentContentChangePartial(partial) => {
+                    let range = partial.range;
+                    let start_byte = position_to_byte_offset(&self.source, range.start);
+                    let end_byte = position_to_byte_offset(&self.source, range.end);
+
+                    let edit = tree_sitter::InputEdit {
+                        start_byte,
+                        old_end_byte: end_byte,
+                        new_end_byte: start_byte + partial.text.len(),
+                        start_position: Point {
+                            row: range.start.line as usize,
+                            column: range.start.character as usize,
+                        },
+                        old_end_position: Point { row: range.end.line as usize, column: range.end.character as usize },
+                        new_end_position: Self::calculate_new_end_point(range.start, &partial.text),
+                    };
+
+                    self.tree.edit(&edit);
+
+                    self.source.replace_range(start_byte..end_byte, &partial.text);
+                }
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(whole) => {
+                    self.source = whole.text;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn calculate_new_end_point(start_pos: Position, text: &str) -> Point {
+        let mut new_pos = Point { row: start_pos.line as usize, column: start_pos.character as usize };
+
+        for (i, line) in text.lines().enumerate() {
+            if i == 0 {
+                new_pos.column += line.len();
+            } else {
+                new_pos.row += 1;
+                new_pos.column = line.len();
+            }
+        }
+
+        new_pos
+    }
+
     pub fn extract_source(&self, language: &Language) -> String {
         let snippets = self.tree.extract_snippets(language, &self.source);
 
@@ -138,6 +189,44 @@ impl View {
         );
 
         extract_source
+    }
+
+    pub fn detect_syntax_context(&self, position: Position) -> SyntaxContext {
+        SyntaxContext::detect(&self.tree, &self.source, position)
+    }
+
+    pub fn resolve_navigation_target(&self, position: Position, uri: &Uri) -> Option<NavigationTarget> {
+        NavigationTarget::resolve_at(&self.tree, &self.source, position, &self.use_directives, uri)
+    }
+
+    pub fn debug_check_source_mismatch(&self, language: &Language, extract_file: Option<&(Uri, PathBuf)>) {
+        let extract_source = self.extract_source(language);
+
+        if let Some((_, extract_file_path)) = extract_file {
+            let Ok(extract_text) = fs::read_to_string(extract_file_path) else {
+                return;
+            };
+
+            if extract_source == extract_text {
+                debug!("(DEBUG CHECK) sources matched perfectly");
+            } else {
+                debug!("(DEBUG CHECK) SOURCES MISMATCH! Analyzing differences...");
+                let extracted_lines: Vec<&str> = extract_source.lines().collect();
+                let extract_lines: Vec<&str> = extract_text.lines().collect();
+                let max_lines = std::cmp::max(extracted_lines.len(), extract_lines.len());
+
+                for i in 0..max_lines {
+                    let e_line = extracted_lines.get(i).unwrap_or(&"<EOF>");
+                    let m_line = extract_lines.get(i).unwrap_or(&"<EOF>");
+
+                    if e_line != m_line {
+                        debug!("Difference found at Line {}:", i + 1);
+                        debug!("  Extract (RAM): {:?}", e_line);
+                        debug!("  Extract (Disk)  : {:?}", m_line);
+                    }
+                }
+            }
+        }
     }
 }
 

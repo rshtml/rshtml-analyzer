@@ -1,5 +1,5 @@
-use crate::backend::Backend;
-use tower_lsp::lsp_types::Position;
+use super::position_to_byte_offset::position_to_byte_offset;
+use lsp_types::Position;
 use tree_sitter::Tree;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,13 +14,12 @@ pub enum SyntaxContext {
 }
 
 impl SyntaxContext {
-    pub fn detect(tree: &Tree, source: &str, position: Position) -> Self {
-        let byte_offset = Backend::position_to_byte_offset(source, position);
+    pub(super) fn detect(tree: &Tree, source: &str, position: Position) -> Self {
+        let byte_offset = position_to_byte_offset(source, position);
         let root = tree.root_node();
 
-        let node = match root.descendant_for_byte_range(byte_offset, byte_offset) {
-            Some(n) => n,
-            None => return Self::Html,
+        let Some(node) = root.descendant_for_byte_range(byte_offset, byte_offset) else {
+            return Self::Html;
         };
 
         let mut current = Some(node);
@@ -60,9 +59,8 @@ impl SyntaxContext {
                         return Self::ComponentParameter(component_name);
                     } else if past_body_or_close {
                         return Self::Html;
-                    } else {
-                        return Self::ComponentTag;
                     }
+                    return Self::ComponentTag;
                 }
                 "component_tag_parameter" => {
                     let mut after_equals = false;
@@ -79,24 +77,24 @@ impl SyntaxContext {
 
                     if after_equals {
                         return Self::ComponentParameterValue;
-                    } else {
-                        let mut component_name = String::new();
-
-                        let mut current_parent = n.parent();
-                        while let Some(parent) = current_parent {
-                            if parent.kind() == "component_tag" {
-                                if let Some(name_node) = parent.child_by_field_name("name")
-                                    && let Ok(text) = name_node.utf8_text(source.as_bytes())
-                                {
-                                    component_name = text.to_string();
-                                }
-                                break;
-                            }
-                            current_parent = parent.parent();
-                        }
-
-                        return Self::ComponentParameter(component_name);
                     }
+
+                    let mut component_name = String::new();
+
+                    let mut current_parent = n.parent();
+                    while let Some(parent) = current_parent {
+                        if parent.kind() == "component_tag" {
+                            if let Some(name_node) = parent.child_by_field_name("name")
+                                && let Ok(text) = name_node.utf8_text(source.as_bytes())
+                            {
+                                component_name = text.to_string();
+                            }
+                            break;
+                        }
+                        current_parent = parent.parent();
+                    }
+
+                    return Self::ComponentParameter(component_name);
                 }
                 "html_text" => return Self::Html,
                 _ => {
