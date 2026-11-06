@@ -9,8 +9,13 @@ pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
 use lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position, TextDocumentContentChangeEvent, Uri};
 pub use navigation_target::NavigationTarget;
 use position_to_byte_offset::position_to_byte_offset;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::PathBuf,
+};
 pub use syntax_context::SyntaxContext;
+use tracing::debug;
 use tree_sitter::{Language, Point, Tree};
 
 pub struct View {
@@ -195,6 +200,39 @@ impl View {
 
     pub fn resolve_navigation_target(&self, position: Position, uri: &Uri) -> Option<NavigationTarget> {
         NavigationTarget::resolve_at(&self.tree, &self.source, position, &self.use_directives, uri)
+    }
+
+    #[allow(dead_code)]
+    #[cfg(debug_assertions)]
+    pub fn debug_check_source_mismatch(&self, language: &Language, extract_file: &Option<(Uri, PathBuf)>) {
+        let extract_source = self.extract_source(&language);
+
+        if let Some((_, extract_file_path)) = extract_file {
+            let Ok(extract_text) = fs::read_to_string(&extract_file_path) else {
+                return;
+            };
+
+            if extract_source != extract_text {
+                debug!("(DEBUG CHECK) SOURCES MISMATCH! Analyzing differences...");
+                let extracted_lines: Vec<&str> = extract_source.lines().collect();
+                let extract_lines: Vec<&str> = extract_text.lines().collect();
+                let max_lines = std::cmp::max(extracted_lines.len(), extract_lines.len());
+
+                for i in 0..max_lines {
+                    let e_line = extracted_lines.get(i).unwrap_or(&"<EOF>");
+                    let m_line = extract_lines.get(i).unwrap_or(&"<EOF>");
+
+                    if e_line != m_line {
+                        debug!("Difference found at Line {}:", i + 1);
+                        debug!("  Extract (RAM): {:?}", e_line);
+                        debug!("  Extract (Disk)  : {:?}", m_line);
+                        continue;
+                    }
+                }
+            } else {
+                debug!("(DEBUG CHECK) sources matched perfectly");
+            }
+        }
     }
 }
 

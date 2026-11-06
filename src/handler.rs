@@ -1,5 +1,4 @@
 pub mod tree_extensions;
-mod utils;
 use crate::app_state::view::NavigationTarget;
 use crate::app_state::view::SyntaxContext;
 use crate::{
@@ -8,7 +7,7 @@ use crate::{
         AppState,
         view::{FIRST_LINE_SHIFT, PARAMS_SHIFT, View},
     },
-    handler::{tree_extensions::TreeExtensions, utils::debug_check_source_mismatch},
+    handler::tree_extensions::TreeExtensions,
     language_server::{log_message, publish_diagnostics, show_message},
     rust_analyzer_client::RustAnalyzerClient,
 };
@@ -136,7 +135,7 @@ pub fn did_open(conn: &Connection, state: &mut AppState, params: DidOpenTextDocu
         let errors = view.tree.find_error(&state.language, &view.source);
 
         if cfg!(debug_assertions) {
-            debug_check_source_mismatch(&extract_file, &view.extract_source(&state.language));
+            view.debug_check_source_mismatch(&state.language, &extract_file);
         }
 
         state.views.insert(uri_str, view);
