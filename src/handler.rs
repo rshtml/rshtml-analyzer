@@ -32,7 +32,7 @@ pub fn initialize(conn: &Connection, state: &mut AppState, params: InitializePar
             WorkspaceFolders::WorkspaceFolderList(list) => list.first(),
             WorkspaceFolders::Null => None,
         })
-        .map(|folder| folder.uri.clone());
+        .map(|folder| &folder.uri);
 
     debug!("workspace root uri: {:?}", workspace_root_uri);
 
@@ -257,7 +257,7 @@ pub fn did_close(conn: &Connection, state: &mut AppState, params: DidCloseTextDo
     if let Some(extract_file_uri) = extract_file
         && let Some(ra_client) = state.ra_client.as_ref()
     {
-        ra_client.did_close(extract_file_uri);
+        ra_client.did_close(&extract_file_uri);
     }
 
     Ok(())
@@ -290,7 +290,7 @@ pub fn did_save(_conn: &Connection, state: &mut AppState, params: DidSaveTextDoc
     Ok(())
 }
 
-pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+pub fn completion(state: &mut AppState, params: CompletionParams) -> Option<CompletionResponse> {
     let uri = params.text_document_position_params.text_document.uri.as_str();
     let position = params.text_document_position_params.position;
     let trigger_char =
@@ -301,7 +301,7 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Opti
     let (mut completion_items, extract_file) = {
         let Some(view) = state.views.get(uri) else {
             debug!("Error while getting completion items");
-            return Ok(None);
+            return None;
         };
 
         let syntax_context = view.detect_syntax_context(position);
@@ -319,7 +319,7 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Opti
 
                 if tc == '@' {
                     completion_items.extend(state.completion_items.clone());
-                    view.extract_file.to_owned()
+                    view.extract_file.clone()
                 } else {
                     None
                 }
@@ -344,13 +344,13 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Opti
                     None
                 }
                 SyntaxContext::ComponentParameter(component_name) => {
-                    for (name, params) in view.use_directives_names_and_params().into_iter() {
+                    for (name, params) in view.use_directives_names_and_params() {
                         if name == component_name {
                             for param in params {
                                 completion_items.push(CompletionItem {
-                                    insert_text: Some(format!("{}=\"$1\"", param)),
-                                    detail: Some(format!("{} attribute", component_name)),
-                                    sort_text: Some(format!("0_{}", param)),
+                                    insert_text: Some(format!("{param}=\"$1\"")),
+                                    detail: Some(format!("{component_name} attribute")),
+                                    sort_text: Some(format!("0_{param}")),
                                     label: param,
                                     kind: Some(CompletionItemKind::Property),
                                     insert_text_format: Some(InsertTextFormat::Snippet),
@@ -363,10 +363,10 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Opti
 
                     None
                 }
-                SyntaxContext::RustCode => view.extract_file.to_owned(),
+                SyntaxContext::RustCode => view.extract_file.clone(),
                 SyntaxContext::TemplateParams => {
                     shift = PARAMS_SHIFT;
-                    view.extract_file.to_owned()
+                    view.extract_file.clone()
                 }
                 _ => None,
             }
@@ -423,11 +423,11 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Opti
         completion_items.extend(ra_items.into_iter().flatten());
     }
 
-    return Ok(Some(CompletionResponse::CompletionList(CompletionList {
+    return Some(CompletionResponse::CompletionList(CompletionList {
         is_incomplete: true,
         items: completion_items,
         ..Default::default()
-    })));
+    }));
 
     fn unshift(items: &mut [CompletionItem], shift: u32) {
         for item in items {
@@ -443,7 +443,7 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Opti
     }
 }
 
-pub fn goto_definition(state: &mut AppState, params: DefinitionParams) -> Result<Option<DefinitionResponse>> {
+pub fn goto_definition(state: &mut AppState, params: &DefinitionParams) -> Option<DefinitionResponse> {
     let uri = &params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
 
@@ -451,19 +451,20 @@ pub fn goto_definition(state: &mut AppState, params: DefinitionParams) -> Result
         && let Some(target) = view.resolve_navigation_target(position, uri)
     {
         let target_uri = match target {
-            NavigationTarget::Component { target_uri, .. } => target_uri,
-            NavigationTarget::UseDirective { target_uri, .. } => target_uri,
+            NavigationTarget::Component { target_uri, .. } | NavigationTarget::UseDirective { target_uri, .. } => {
+                target_uri
+            }
         };
-        return Ok(Some(DefinitionResponse::Definition(Definition::Location(Location {
+        return Some(DefinitionResponse::Definition(Definition::Location(Location {
             uri: target_uri,
             range: Range::default(),
-        }))));
+        })));
     }
 
-    Ok(None)
+    None
 }
 
-pub fn hover(state: &mut AppState, params: HoverParams) -> Result<Option<Hover>> {
+pub fn hover(state: &mut AppState, params: &HoverParams) -> Option<Hover> {
     let uri = &params.text_document_position_params.text_document.uri;
     let position = params.text_document_position_params.position;
 
@@ -475,7 +476,7 @@ pub fn hover(state: &mut AppState, params: HoverParams) -> Result<Option<Hover>>
                 let params_doc = if params.is_empty() {
                     "_No parameters_".to_string()
                 } else {
-                    params.iter().map(|p| format!("- `{}`", p)).collect::<Vec<_>>().join("\n")
+                    params.iter().map(|p| format!("- `{p}`")).collect::<Vec<_>>().join("\n")
                 };
 
                 let file_name =
@@ -492,20 +493,20 @@ pub fn hover(state: &mut AppState, params: HoverParams) -> Result<Option<Hover>>
             }
         };
 
-        return Ok(Some(Hover {
+        return Some(Hover {
             contents: Contents::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: markdown }),
             range: Some(range),
-        }));
+        });
     }
 
-    Ok(None)
+    None
 }
 
-pub fn did_change_watched_files(state: &mut AppState, params: DidChangeWatchedFilesParams) -> Result<()> {
+pub fn did_change_watched_files(state: &mut AppState, params: &DidChangeWatchedFilesParams) {
     let cargo_toml_changed = params.changes.iter().any(|event| event.uri.path().ends_with("/Cargo.toml"));
 
     if !cargo_toml_changed {
-        return Ok(());
+        return;
     }
 
     debug!("Cargo.toml changed. Re-analyzing...");
@@ -516,5 +517,4 @@ pub fn did_change_watched_files(state: &mut AppState, params: DidChangeWatchedFi
     });
 
     debug!("Workspace re-analysis complete.");
-    Ok(())
 }

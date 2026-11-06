@@ -22,7 +22,7 @@ impl AppState {
     pub fn new(parser: Parser, completion_items: Vec<CompletionItem>, language: Language) -> Self {
         Self {
             workspace: Workspace::default(),
-            parser: parser,
+            parser,
             views: HashMap::new(),
             completion_items,
             language,

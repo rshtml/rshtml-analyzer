@@ -81,7 +81,7 @@ impl RustAnalyzerClient {
                             (Some(id), Some(method)) => {
                                 let result = if method == "workspace/configuration" {
                                     debug!("RA sent a pull request for the configs.");
-                                    let n = json["params"]["items"].as_array().map(|a| a.len()).unwrap_or(1);
+                                    let n = json["params"]["items"].as_array().map_or(1, Vec::len);
                                     let cfg = json!({
                                         "rust": { "analyzerTargetDir": true }
                                     });
@@ -157,16 +157,16 @@ impl RustAnalyzerClient {
         Some(Self { stdin, next_id: AtomicU64::new(1), pending_requests, uri_map })
     }
 
-    fn send_notification(&self, method: &str, params: Value) {
+    fn send_notification(&self, method: &str, params: &Value) {
         let message = json!({
             "jsonrpc": "2.0",
             "method": method,
             "params": params
         });
-        self.write_to_stdin(message);
+        self.write_to_stdin(&message);
     }
 
-    fn send_request_without_wait(&self, method: &str, params: Value) {
+    fn send_request_without_wait(&self, method: &str, params: &Value) {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let message = json!({
             "jsonrpc": "2.0",
@@ -174,10 +174,10 @@ impl RustAnalyzerClient {
             "method": method,
             "params": params
         });
-        self.write_to_stdin(message);
+        self.write_to_stdin(&message);
     }
 
-    fn send_request(&self, method: &str, params: Value) -> Value {
+    fn send_request(&self, method: &str, params: &Value) -> Value {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let message = json!({
@@ -192,7 +192,7 @@ impl RustAnalyzerClient {
             pending.insert(id, tx);
         }
 
-        self.write_to_stdin(message);
+        self.write_to_stdin(&message);
 
         rx.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|e| {
             if let Ok(mut pending) = self.pending_requests.lock() {
@@ -203,7 +203,7 @@ impl RustAnalyzerClient {
         })
     }
 
-    fn write_to_stdin(&self, json_msg: Value) {
+    fn write_to_stdin(&self, json_msg: &Value) {
         let msg_string = json_msg.to_string();
         let lsp_msg = format!("Content-Length: {}\r\n\r\n{}", msg_string.len(), msg_string);
 
@@ -213,7 +213,7 @@ impl RustAnalyzerClient {
         }
     }
 
-    pub fn initialize(&self, root_uri: Option<Uri>) -> Value {
+    pub fn initialize(&self, root_uri: Option<&Uri>) -> Value {
         let params = json!({
             "processId": std::process::id(),
             "rootUri": root_uri,
@@ -238,13 +238,13 @@ impl RustAnalyzerClient {
             }
         });
 
-        let response = self.send_request("initialize", params);
+        let response = self.send_request("initialize", &params);
         debug!("RA Initialize process completed successfully.");
         response
     }
 
     pub fn initialized(&self) {
-        self.send_notification("initialized", json!({}));
+        self.send_notification("initialized", &json!({}));
         debug!("RA Handshake done!");
     }
 
@@ -252,10 +252,10 @@ impl RustAnalyzerClient {
         let params = DidOpenTextDocumentParams {
             text_document: TextDocumentItem { uri, language_id: "rust".into(), version: 1, text },
         };
-        self.send_notification("textDocument/didOpen", serde_json::to_value(params).unwrap());
+        self.send_notification("textDocument/didOpen", &serde_json::to_value(params).unwrap());
         debug!("RA open file request sent.");
 
-        self.send_request_without_wait("rust-analyzer/reloadWorkspace", json!(null));
+        self.send_request_without_wait("rust-analyzer/reloadWorkspace", &json!(null));
         debug!("RA workspace reload request sent");
     }
 
@@ -270,11 +270,11 @@ impl RustAnalyzerClient {
             )],
         };
 
-        self.send_notification("textDocument/didChange", serde_json::to_value(params).unwrap());
+        self.send_notification("textDocument/didChange", &serde_json::to_value(params).unwrap());
     }
 
     pub fn completion(&self, params: CompletionParams) -> Value {
-        let response = self.send_request("textDocument/completion", serde_json::to_value(params).unwrap());
+        let response = self.send_request("textDocument/completion", &serde_json::to_value(params).unwrap());
 
         if let Some(err) = response.get("error") {
             debug!("(COMPLETION) RA completion error: {err}");
@@ -284,18 +284,18 @@ impl RustAnalyzerClient {
     }
 
     pub fn did_save(&self, params: DidSaveTextDocumentParams) {
-        self.send_notification("textDocument/didSave", serde_json::to_value(params).unwrap());
+        self.send_notification("textDocument/didSave", &serde_json::to_value(params).unwrap());
     }
 
-    pub fn did_close(&self, uri: Uri) {
+    pub fn did_close(&self, uri: &Uri) {
         let params = json!({ "textDocument": { "uri": uri } });
-        self.send_notification("textDocument/didClose", params);
+        self.send_notification("textDocument/didClose", &params);
     }
 
     #[allow(dead_code)]
-    pub fn analyzer_status(&self, uri: Uri) -> String {
+    pub fn analyzer_status(&self, uri: &Uri) -> String {
         let params = json!({ "textDocument": { "uri": uri } });
-        let response = self.send_request("rust-analyzer/analyzerStatus", params);
+        let response = self.send_request("rust-analyzer/analyzerStatus", &params);
 
         response.get("result").unwrap_or(&response).as_str().unwrap_or_default().to_string()
     }

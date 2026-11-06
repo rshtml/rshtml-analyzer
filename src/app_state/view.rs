@@ -205,10 +205,10 @@ impl View {
     #[allow(dead_code)]
     #[cfg(debug_assertions)]
     pub fn debug_check_source_mismatch(&self, language: &Language, extract_file: &Option<(Uri, PathBuf)>) {
-        let extract_source = self.extract_source(&language);
+        let extract_source = self.extract_source(language);
 
         if let Some((_, extract_file_path)) = extract_file {
-            let Ok(extract_text) = fs::read_to_string(&extract_file_path) else {
+            let Ok(extract_text) = fs::read_to_string(extract_file_path) else {
                 return;
             };
 

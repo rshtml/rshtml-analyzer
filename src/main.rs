@@ -15,8 +15,6 @@ struct Cli {
     version: bool,
 }
 
-#[cfg(debug_assertions)]
-
 pub const BUILD_MODE: &str = if cfg!(debug_assertions) { "dev/debug" } else { "release" };
 pub type Result<T, E = Box<dyn std::error::Error + Sync + Send>> = std::result::Result<T, E>;
 
@@ -45,7 +43,7 @@ fn main() -> Result<()> {
 
 fn stdio_connection() -> Result<()> {
     let (connection, io_threads) = Connection::stdio();
-    language_server::run(connection)?;
+    language_server::run(&connection)?;
     io_threads.join()?;
     Ok(())
 }
@@ -60,7 +58,7 @@ fn tcp_connection() -> Result<()> {
     let (connection, io_threads) = Connection::listen(addr)?;
     debug!("New client connected!");
 
-    language_server::run(connection)?;
+    language_server::run(&connection)?;
     io_threads.join()?;
     debug!("Client session ended");
 

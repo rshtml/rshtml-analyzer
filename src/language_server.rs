@@ -20,18 +20,18 @@ use lsp_types::{
 use serde_json::{from_value, to_value};
 use tracing::debug;
 
-pub fn run(connection: Connection) -> Result<()> {
+pub fn run(connection: &Connection) -> Result<()> {
     let (id, init_params) = connection.initialize_start()?;
     let init_params: InitializeParams = serde_json::from_value(init_params)?;
 
     let mut state = AppState::setup();
 
-    initialize(&connection, &mut state, init_params)?;
+    initialize(connection, &mut state, init_params)?;
 
     debug!("Sending an initialize response.");
     connection.initialize_finish(id, to_value(initialize_result())?)?;
 
-    initialized(&connection)?;
+    initialized(connection)?;
 
     for msg in &connection.receiver {
         match msg {
@@ -39,12 +39,12 @@ pub fn run(connection: Connection) -> Result<()> {
                 if connection.handle_shutdown(&req)? {
                     break;
                 }
-                if let Err(err) = handle_request(&connection, &req, &mut state) {
+                if let Err(err) = handle_request(connection, &req, &mut state) {
                     debug!("[lsp] request {} failed: {err}", req.method);
                 }
             }
             Message::Notification(note) => {
-                if let Err(err) = handle_notification(&connection, &note, &mut state) {
+                if let Err(err) = handle_notification(connection, &note, &mut state) {
                     debug!("[lsp] notification {} failed: {err}", note.method);
                 }
             }
@@ -104,28 +104,30 @@ pub fn initialize_result() -> InitializeResult {
 // ======================================================================
 
 fn handle_notification(conn: &Connection, note: &Notification, state: &mut AppState) -> Result<()> {
-    Ok(match note.method.as_str().into() {
+    match note.method.as_str().into() {
         DidOpenTextDocumentNotification::METHOD => did_open(conn, state, from_value(note.params.clone())?)?,
         DidChangeTextDocumentNotification::METHOD => did_change(conn, state, from_value(note.params.clone())?)?,
         DidSaveTextDocumentNotification::METHOD => did_save(conn, state, from_value(note.params.clone())?)?,
         DidCloseTextDocumentNotification::METHOD => did_close(conn, state, from_value(note.params.clone())?)?,
-        DidChangeWatchedFilesNotification::METHOD => did_change_watched_files(state, from_value(note.params.clone())?)?,
+        DidChangeWatchedFilesNotification::METHOD => did_change_watched_files(state, &from_value(note.params.clone())?),
         _ => {}
-    })
+    }
+
+    Ok(())
 }
 
 fn handle_request(conn: &Connection, req: &Request, state: &mut AppState) -> Result<()> {
     match req.method.as_str().into() {
         HoverRequest::METHOD => {
-            let response = hover(state, from_value(req.params.clone())?)?;
+            let response = hover(state, &from_value(req.params.clone())?);
             send_ok(&conn.sender, req.id.clone(), &response)?;
         }
         DefinitionRequest::METHOD => {
-            let response = goto_definition(state, from_value(req.params.clone())?)?;
+            let response = goto_definition(state, &from_value(req.params.clone())?);
             send_ok(&conn.sender, req.id.clone(), &response)?;
         }
         CompletionRequest::METHOD => {
-            let response = completion(state, from_value(req.params.clone())?)?;
+            let response = completion(state, from_value(req.params.clone())?);
             send_ok(&conn.sender, req.id.clone(), &response)?;
         }
         _ => {
