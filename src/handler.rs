@@ -1,19 +1,14 @@
-mod navigation_target;
-mod syntax_context;
 pub mod tree_extensions;
 mod utils;
+use crate::app_state::view::NavigationTarget;
+use crate::app_state::view::SyntaxContext;
 use crate::{
     BUILD_MODE, Result,
     app_state::{
         AppState,
         view::{FIRST_LINE_SHIFT, PARAMS_SHIFT, View},
     },
-    handler::{
-        navigation_target::NavigationTarget,
-        syntax_context::SyntaxContext,
-        tree_extensions::TreeExtensions,
-        utils::{debug_check_source_mismatch, generate_extract_file_path, process_changes},
-    },
+    handler::{tree_extensions::TreeExtensions, utils::debug_check_source_mismatch},
     language_server::{log_message, publish_diagnostics, show_message},
     rust_analyzer_client::RustAnalyzerClient,
 };
@@ -114,9 +109,9 @@ pub fn did_open(conn: &Connection, state: &mut AppState, params: DidOpenTextDocu
             })
             .ok()?;
 
-        let (root_path, relative_path) = state.workspace.find_root_and_relative_path(&path);
-
-        let extract_file_path = generate_extract_file_path(&root_path, &relative_path)
+        let extract_file_path = state
+            .workspace
+            .generate_extract_file_path(&path)
             .map_err(|e| debug!("generate_module_path error: {}", e))
             .ok()?;
 
@@ -189,7 +184,7 @@ pub fn did_change(conn: &Connection, state: &mut AppState, params: DidChangeText
             return Ok(());
         }
 
-        process_changes(params.content_changes, &mut view.source, &mut view.tree);
+        view.process_changes(params.content_changes);
 
         let Some(tree) = state.parser.parse(&view.source, Some(&view.tree)) else {
             debug!("Error while parsing tree");
@@ -310,7 +305,7 @@ pub fn completion(state: &mut AppState, params: CompletionParams) -> Result<Opti
             return Ok(None);
         };
 
-        let syntax_context = SyntaxContext::detect(&view.tree, &view.source, position);
+        let syntax_context = view.detect_syntax_context(position);
         let mut completion_items: Vec<CompletionItem> = Vec::new();
 
         debug!("(COMPLETION) ctx: {:?}, pos: {:?}", syntax_context, position);
@@ -454,8 +449,7 @@ pub fn goto_definition(state: &mut AppState, params: DefinitionParams) -> Result
     let position = params.text_document_position_params.position;
 
     if let Some(view) = state.views.get(uri.as_str())
-        && let Some(target) =
-            NavigationTarget::resolve_at(&view.tree, &view.source, position, &view.use_directives, uri)
+        && let Some(target) = view.resolve_navigation_target(position, uri)
     {
         let target_uri = match target {
             NavigationTarget::Component { target_uri, .. } => target_uri,
@@ -475,8 +469,7 @@ pub fn hover(state: &mut AppState, params: HoverParams) -> Result<Option<Hover>>
     let position = params.text_document_position_params.position;
 
     if let Some(view) = state.views.get(uri.as_str())
-        && let Some(target) =
-            NavigationTarget::resolve_at(&view.tree, &view.source, position, &view.use_directives, uri)
+        && let Some(target) = view.resolve_navigation_target(position, uri)
     {
         let (range, markdown) = match target {
             NavigationTarget::Component { name, target_uri, range, params } => {

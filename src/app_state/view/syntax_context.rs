@@ -1,4 +1,4 @@
-use crate::handler::utils::position_to_byte_offset;
+use super::position_to_byte_offset::position_to_byte_offset;
 use lsp_types::Position;
 use tree_sitter::Tree;
 
@@ -14,7 +14,7 @@ pub enum SyntaxContext {
 }
 
 impl SyntaxContext {
-    pub fn detect(tree: &Tree, source: &str, position: Position) -> Self {
+    pub(super) fn detect(tree: &Tree, source: &str, position: Position) -> Self {
         let byte_offset = position_to_byte_offset(source, position);
         let root = tree.root_node();
 

@@ -194,7 +194,7 @@ impl RustAnalyzerClient {
 
         self.write_to_stdin(message);
 
-        rx.recv_timeout(Duration::from_secs(1)).unwrap_or_else(|e| {
+        rx.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|e| {
             if let Ok(mut pending) = self.pending_requests.lock() {
                 pending.remove(&id);
             }

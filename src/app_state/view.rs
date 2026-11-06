@@ -1,12 +1,17 @@
 mod extract;
-
-use extract::Extract;
-pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
-use lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Uri};
-use std::collections::{HashMap, HashSet};
-use tree_sitter::{Language, Tree};
+mod navigation_target;
+mod position_to_byte_offset;
+mod syntax_context;
 
 use crate::handler::tree_extensions::TreeExtensions;
+use extract::Extract;
+pub use extract::{FIRST_LINE_SHIFT, PARAMS_SHIFT, Snippet};
+use lsp_types::{CompletionItem, CompletionItemKind, InsertTextFormat, Position, TextDocumentContentChangeEvent, Uri};
+pub use navigation_target::NavigationTarget;
+use position_to_byte_offset::position_to_byte_offset;
+use std::collections::{HashMap, HashSet};
+pub use syntax_context::SyntaxContext;
+use tree_sitter::{Language, Point, Tree};
 
 pub struct View {
     pub source: String,
@@ -116,6 +121,53 @@ impl View {
         }
     }
 
+    pub fn process_changes(&mut self, content_changes: Vec<TextDocumentContentChangeEvent>) {
+        for change in content_changes {
+            match change {
+                TextDocumentContentChangeEvent::TextDocumentContentChangePartial(partial) => {
+                    let range = partial.range;
+                    let start_byte = position_to_byte_offset(&self.source, range.start);
+                    let end_byte = position_to_byte_offset(&self.source, range.end);
+
+                    let edit = tree_sitter::InputEdit {
+                        start_byte,
+                        old_end_byte: end_byte,
+                        new_end_byte: start_byte + partial.text.len(),
+                        start_position: Point {
+                            row: range.start.line as usize,
+                            column: range.start.character as usize,
+                        },
+                        old_end_position: Point { row: range.end.line as usize, column: range.end.character as usize },
+                        new_end_position: self.calculate_new_end_point(range.start, &partial.text),
+                    };
+
+                    self.tree.edit(&edit);
+
+                    self.source.replace_range(start_byte..end_byte, &partial.text);
+                }
+                TextDocumentContentChangeEvent::TextDocumentContentChangeWholeDocument(whole) => {
+                    self.source = whole.text;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn calculate_new_end_point(&self, start_pos: Position, text: &str) -> Point {
+        let mut new_pos = Point { row: start_pos.line as usize, column: start_pos.character as usize };
+
+        for (i, line) in text.lines().enumerate() {
+            if i == 0 {
+                new_pos.column += line.len();
+            } else {
+                new_pos.row += 1;
+                new_pos.column = line.len();
+            }
+        }
+
+        new_pos
+    }
+
     pub fn extract_source(&self, language: &Language) -> String {
         let snippets = self.tree.extract_snippets(language, &self.source);
 
@@ -135,6 +187,14 @@ impl View {
         );
 
         extract_source
+    }
+
+    pub fn detect_syntax_context(&self, position: Position) -> SyntaxContext {
+        SyntaxContext::detect(&self.tree, &self.source, position)
+    }
+
+    pub fn resolve_navigation_target(&self, position: Position, uri: &Uri) -> Option<NavigationTarget> {
+        NavigationTarget::resolve_at(&self.tree, &self.source, position, &self.use_directives, uri)
     }
 }
 

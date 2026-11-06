@@ -1,4 +1,5 @@
-use crate::handler::{tree_extensions::TreeExtensions, utils::position_to_byte_offset};
+use super::position_to_byte_offset::position_to_byte_offset;
+use crate::handler::tree_extensions::TreeExtensions;
 use lsp_types::{Position, Range, Uri};
 use tree_sitter::Tree;
 
@@ -9,7 +10,7 @@ pub enum NavigationTarget {
 }
 
 impl NavigationTarget {
-    pub fn resolve_at(
+    pub(super) fn resolve_at(
         tree: &Tree,
         source: &str,
         position: Position,
