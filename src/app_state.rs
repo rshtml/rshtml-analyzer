@@ -76,16 +76,6 @@ impl AppState {
             ..Default::default()
         };
 
-        let match_ = CompletionItem {
-            label: "match".to_string(),
-            kind: Some(CompletionItemKind::Snippet),
-            insert_text: Some("match ${1:expression} {\n\t${2:pattern} => {\n\t\t$0\n\t},\n}".to_string()),
-            insert_text_format: Some(InsertTextFormat::Snippet),
-            detail: Some("match statement".to_string()),
-            sort_text: Some("03".to_string()),
-            ..Default::default()
-        };
-
         let rust_expr_paren_ = CompletionItem {
             label: "@()".to_string(),
             kind: Some(CompletionItemKind::Snippet),
@@ -146,6 +136,6 @@ impl AppState {
             ..Default::default()
         };
 
-        vec![if_, for_, while_, match_, use_as_, use_, child_content_, rust_block_, rust_expr_paren_]
+        vec![if_, for_, while_, use_as_, use_, child_content_, rust_block_, rust_expr_paren_]
     }
 }
